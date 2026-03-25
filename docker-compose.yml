@@ -1,0 +1,126 @@
+# docker-compose.yml — Kafka (via Redpanda) + LiveKit + SIP for local testing
+#
+# Start everything:   docker compose up -d
+# Stop everything:    docker compose down
+# View logs:          docker compose logs -f
+# Kafka shell:        docker compose exec kafka rpk topic list
+#
+# After starting, your endpoints are:
+#   Kafka broker:     localhost:9092
+#   LiveKit server:   ws://localhost:7880
+#   LiveKit API key:  devkey
+#   LiveKit secret:   devsecret
+#   SIP endpoint:     localhost:5060 (UDP/TCP)
+
+services:
+
+  # ── Kafka (Redpanda — drop-in Kafka replacement, no JVM, works on Windows) ──
+  kafka:
+    image: redpandadata/redpanda:latest
+    container_name: kafka
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka topic auto-create on startup ────────────────────────────────────
+  kafka-setup:
+    image: redpandadata/redpanda:latest
+    container_name: kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: >-
+      rpk --brokers kafka:9092 topic create call_requests    --partitions 4 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create call_assignments --partitions 4 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create gpu_capacity     --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create call_started     --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create call_completed   --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create call_failed      --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create worker_heartbeat --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create call_dlq         --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create sip_events       --partitions 1 --replicas 1 2>/dev/null || true &&
+      echo All Kafka topics created.
+    restart: "no"
+
+  # ── LiveKit server ────────────────────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      - LIVEKIT_KEYS=devkey:devsecret
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── LiveKit SIP server (PSTN/SIP gateway) ─────────────────────────────────
+  # FIXED: Internal network only. Asterisk talks to this container directly.
+  # ADDED: LiveKit SIP must NOT be publicly exposed to prevent SIP attacks.
+  livekit-sip:
+    image: livekit/sip:latest
+    container_name: livekit-sip
+    depends_on:
+      livekit:
+        condition: service_healthy
+    environment:
+      - SIP_PORT=5060
+      - SIP_PORT_LISTEN=5060
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_WEBHOOK_URL=http://host.docker.internal:8000/sip/webhook
+      
+      # UPDATED: Webhook URL triggers the FastAPI backend.
+      # Use ONE of the following based on your environment:
+      # 1. Docker network -> http://backend:8000/sip/webhook (If FastAPI is in docker-compose)
+      # 2. Local machine -> http://host.docker.internal:8000/sip/webhook (Standard Docker Desktop)
+      # 3. Linux fallback -> http://172.17.0.1:8000/sip/webhook (Native Linux Docker host)
+      #- LIVEKIT_WEBHOOK_URL=http://host.docker.internal:8000/sip/webhook
+    # FIXED: Removed `ports:` section. LiveKit SIP has NO exposed ports.
+    restart: unless-stopped
+
+  # ── Asterisk PBX (PSTN gateway) ───────────────────────────────────────────
+  # Publicly exposed component. Receives PSTN calls from Twilio.
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: asterisk
+    depends_on:
+      - livekit-sip
+    volumes:
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+    ports:
+      # FIXED: Twilio sends SIP to port 5060. Asterisk must use host port 5060.
+      - "5060:5060/udp"        
+      - "5060:5060/tcp"
+      # FIXED: RTP port range ensures no concurrent call limits or audio drops.
+      - "10000-20000:10000-20000/udp"
+    environment:
+      - ASTERISK_UID=0
+      - ASTERISK_GID=0
+    restart: unless-stopped
+
+volumes:
+  kafka_data:
+

@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveKit Pipeline Test Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --blue: #58a6ff;
+      --purple: #a371f7;
+      --orange: #f0883e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    header .subtitle {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pulse {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .4
+      }
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 20px 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    @media(max-width:900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .full-width {
+      grid-column: 1/-1;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+    }
+
+    .card-body {
+      padding: 16px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .status-row:last-child {
+      border-bottom: none;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-green {
+      background: var(--green);
+      box-shadow: 0 0 4px var(--green);
+    }
+
+    .dot-red {
+      background: var(--red);
+      box-shadow: 0 0 4px var(--red);
+    }
+
+    .dot-yellow {
+      background: var(--yellow);
+      box-shadow: 0 0 4px var(--yellow);
+    }
+
+    .dot-grey {
+      background: var(--muted);
+    }
+
+    .status-label {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .status-value {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: monospace;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .metric-box {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .metric-val {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--blue);
+    }
+
+    .metric-lbl {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .vram-bar-wrap {
+      margin: 12px 0;
+    }
+
+    .vram-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .vram-bar {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .vram-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--blue), var(--purple));
+      border-radius: 4px;
+      transition: width .5s ease;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: opacity .15s;
+    }
+
+    .btn:hover {
+      opacity: .8;
+    }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #000;
+    }
+
+    .btn-success {
+      background: var(--green);
+      color: #000;
+    }
+
+    .btn-danger {
+      background: var(--red);
+      color: #fff;
+    }
+
+    .btn-warn {
+      background: var(--yellow);
+      color: #000;
+    }
+
+    .btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 12px 0;
+      overflow-x: auto;
+    }
+
+    .flow-box {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: border-color .3s, box-shadow .3s;
+    }
+
+    .flow-box.active {
+      border-color: var(--green);
+      box-shadow: 0 0 8px rgba(63, 185, 80, .3);
+    }
+
+    .flow-box.error {
+      border-color: var(--red);
+      box-shadow: 0 0 8px rgba(248, 81, 73, .3);
+    }
+
+    .flow-arrow {
+      color: var(--muted);
+      padding: 0 6px;
+      font-size: 16px;
+    }
+
+    .log {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      height: 220px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .log-entry {
+      padding: 1px 0;
+    }
+
+    .log-ok {
+      color: var(--green);
+    }
+
+    .log-err {
+      color: var(--red);
+    }
+
+    .log-warn {
+      color: var(--yellow);
+    }
+
+    .log-info {
+      color: var(--blue);
+    }
+
+    .log-muted {
+      color: var(--muted);
+    }
+
+    .topic-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .topic-table th {
+      text-align: left;
+      color: var(--muted);
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      font-size: 11px;
+    }
+
+    .topic-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--border);
+      font-family: monospace;
+    }
+
+    .topic-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .badge-green {
+      background: rgba(63, 185, 80, .15);
+      color: var(--green);
+    }
+
+    .badge-red {
+      background: rgba(248, 81, 73, .15);
+      color: var(--red);
+    }
+
+    .badge-yellow {
+      background: rgba(210, 153, 34, .15);
+      color: var(--yellow);
+    }
+
+    .token-box {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: monospace;
+      font-size: 11px;
+      word-break: break-all;
+      color: var(--muted);
+      max-height: 80px;
+      overflow-y: auto;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .input-row label {
+      font-size: 12px;
+      color: var(--muted);
+      width: 60px;
+    }
+
+    select,
+    input[type=text] {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    select:focus,
+    input[type=text]:focus {
+      border-color: var(--blue);
+    }
+
+    .refresh-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .refresh-btn:hover {
+      color: var(--text);
+      border-color: var(--text);
+    }
+
+    .ts {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .audio-section {
+      margin-top: 12px;
+    }
+
+    #audioViz {
+      width: 100%;
+      height: 60px;
+      background: #0d1117;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <div class="pulse" id="headerPulse"></div>
+    <div>
+      <h1>LiveKit + Kafka Pipeline Dashboard</h1>
+      <div class="subtitle">GPU-aware AI call center — test & diagnostics</div>
+    </div>
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+      <span class="ts" id="lastRefresh">—</span>
+      <button class="refresh-btn" onclick="refreshAll()">↻ Refresh All</button>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <!-- ── System Health ────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">System Health</span>
+        <button class="refresh-btn" onclick="loadHealth()">↻</button>
+      </div>
+      <div class="card-body">
+        <div id="healthRows">
+          <div class="status-row">
+            <div class="dot dot-grey"></div>
+            <div class="status-label">LiveKit Server</div>
+            <div class="status-value">checking…</div>
+          </div>
+          <div class="status-row">
+            <div class="dot dot-grey"></div>
+            <div class="status-label">Kafka Broker</div>
+            <div class="status-value">checking…</div>
+          </div>
+          <div class="status-row">
+            <div class="dot dot-grey"></div>
+            <div class="status-label">GPU / NVML</div>
+            <div class="status-value">checking…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── GPU Capacity ──────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">GPU / CPU Capacity</span>
+        <button class="refresh-btn" onclick="loadGpu()">↻</button>
+      </div>
+      <div class="card-body">
+        <div class="metric-grid" id="gpuMetrics">
+          <div class="metric-box">
+            <div class="metric-val" id="gpuMaxCalls">—</div>
+            <div class="metric-lbl">Max Calls</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val" id="gpuUtil">—</div>
+            <div class="metric-lbl">GPU Util %</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val" id="gpuPerCall">—</div>
+            <div class="metric-lbl">MB/Call</div>
+          </div>
+        </div>
+        <div class="vram-bar-wrap" id="vramWrap" style="display:none">
+          <div class="vram-bar-label">
+            <span>VRAM Used</span>
+            <span id="vramText">0 / 0 MB</span>
+          </div>
+          <div class="vram-bar">
+            <div class="vram-bar-fill" id="vramFill" style="width:0%"></div>
+          </div>
+        </div>
+        <div id="gpuNote" style="color:var(--muted);font-size:12px;margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <!-- ── Kafka Topics ──────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Kafka Topics</span>
+        <button class="refresh-btn" onclick="loadKafka()">↻</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <table class="topic-table">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Role</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="topicRows">
+            <tr>
+              <td colspan="3" style="text-align:center;color:var(--muted);padding:20px">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Queue Status ──────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Call Queue</span>
+        <button class="refresh-btn" onclick="loadQueueStatus()">↻</button>
+      </div>
+      <div class="card-body">
+        <div class="metric-grid" style="grid-template-columns:1fr 1fr">
+          <div class="metric-box">
+            <div class="metric-val" id="queueDepth">—</div>
+            <div class="metric-lbl">Queue Depth</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val" id="queueEta">—</div>
+            <div class="metric-lbl">Est. Wait (s)</div>
+          </div>
+        </div>
+        <div id="queueNote" style="color:var(--muted);font-size:12px;margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <!-- ── Pipeline Flow ─────────────────────────────────────────── -->
+    <div class="card full-width">
+      <div class="card-header">
+        <span class="card-title">Pipeline Flow — Live Test</span>
+      </div>
+      <div class="card-body">
+        <div class="flow" id="pipelineFlow">
+          <div class="flow-box" id="step-browser">Browser</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-token">Token API</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-kafka">Kafka Produce</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-scheduler">Scheduler</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-worker">GPU Worker</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-ai">AI Pipeline</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-box" id="step-audio">Audio Out</div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary" onclick="runPipelineTest()">▶ Run Kafka Round-Trip Test</button>
+          <button class="btn btn-success" onclick="getToken()">🔑 Get LiveKit Token</button>
+          <button class="btn btn-warn" onclick="checkAll()">🔍 Check All Systems</button>
+          <button class="btn" style="background:#6c47ff;color:#fff" onclick="createTopics()">⚡ Create Missing
+            Topics</button>
+        </div>
+        <div id="pipelineResult" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
+    <!-- ── Token Generator ───────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">LiveKit Token Generator</span>
+      </div>
+      <div class="card-body">
+        <div class="input-row">
+          <label>Language</label>
+          <select id="tokenLang">
+            <option value="en">English</option>
+            <option value="hi">Hindi</option>
+            <option value="te">Telugu</option>
+          </select>
+          <label style="width:40px">LLM</label>
+          <select id="tokenLlm">
+            <option value="gemini">Gemini</option>
+            <option value="qwen">Qwen</option>
+          </select>
+        </div>
+        <div class="btn-row" style="margin-bottom:12px">
+          <button class="btn btn-success" onclick="getToken()">Generate Token</button>
+          <button class="btn btn-primary" id="connectBtn" onclick="connectLiveKit()" disabled>Connect to Room</button>
+          <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectLiveKit()"
+            style="display:none">Disconnect</button>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Token (JWT):</div>
+        <div class="token-box" id="tokenDisplay">— press Generate Token —</div>
+        <div id="roomInfo" style="margin-top:10px;font-size:12px;color:var(--muted);"></div>
+      </div>
+    </div>
+
+    <!-- ── Audio Test ────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Audio / Connection Test</span>
+      </div>
+      <div class="card-body">
+        <div id="connectionStatus" style="margin-bottom:12px;font-size:13px;color:var(--muted)">Not connected</div>
+        <canvas id="audioViz"></canvas>
+        <div class="audio-section">
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-primary" onclick="testMic()" id="micBtn">🎤 Test Microphone</button>
+            <button class="btn btn-warn" onclick="stopMic()" id="stopMicBtn" style="display:none">⏹ Stop Mic</button>
+          </div>
+        </div>
+        <div id="audioNote" style="margin-top:10px;font-size:12px;color:var(--muted)">Connect to a room first to test
+          full-duplex audio.</div>
+      </div>
+    </div>
+
+    <!-- ── Live Log ──────────────────────────────────────────────── -->
+    <div class="card full-width">
+      <div class="card-header">
+        <span class="card-title">Test Log</span>
+        <button class="refresh-btn" onclick="clearLog()">✕ Clear</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="log" id="logPanel"></div>
+      </div>
+    </div>
+
+  </div><!-- /layout -->
+
+  <script>
+    // ── State ──────────────────────────────────────────────────────────────────
+    let currentToken = null;
+    let currentRoom = null;
+    let currentRoomId = null;
+    let micStream = null;
+    let audioCtx = null;
+    let analyser = null;
+    let vizFrame = null;
+
+    const TOPIC_ROLES = {
+      call_requests: "FastAPI → Scheduler",
+      call_assignments: "Scheduler → Worker",
+      gpu_capacity: "Worker → Scheduler",
+      call_started: "Worker lifecycle",
+      call_completed: "Worker lifecycle",
+      call_failed: "Worker lifecycle",
+      worker_heartbeat: "Worker → Scheduler",
+      call_dlq: "Dead-letter queue",
+    };
+
+    // ── Logging ────────────────────────────────────────────────────────────────
+    function log(msg, type = "info") {
+      const p = document.getElementById("logPanel");
+      const ts = new Date().toLocaleTimeString();
+      const div = document.createElement("div");
+      div.className = `log-entry log-${type}`;
+      div.textContent = `[${ts}] ${msg}`;
+      p.appendChild(div);
+      p.scrollTop = p.scrollHeight;
+    }
+    function clearLog() { document.getElementById("logPanel").innerHTML = ""; }
+
+    // ── Fetch helpers ──────────────────────────────────────────────────────────
+    async function apiFetch(path, opts = {}) {
+      const r = await fetch(path, opts);
+      return r.json();
+    }
+
+    // ── Health ─────────────────────────────────────────────────────────────────
+    async function loadHealth() {
+      try {
+        const d = await apiFetch("/api/health");
+        const rows = document.getElementById("healthRows");
+        rows.innerHTML = "";
+
+        const items = [
+          { label: "LiveKit Server", ok: d.livekit?.status === "ok", val: d.livekit?.url || "—" },
+          { label: "Kafka Broker", ok: d.kafka?.status === "ok", val: (d.kafka?.brokers || []).join(", ") },
+          { label: "GPU / NVML", ok: d.gpu?.available === true, val: d.gpu?.available ? `${d.gpu.max_calls} max calls` : (d.gpu?.error || "CPU fallback") },
+        ];
+
+        items.forEach(item => {
+          const row = document.createElement("div");
+          row.className = "status-row";
+          row.innerHTML = `
+        <div class="dot ${item.ok ? 'dot-green' : 'dot-red'}"></div>
+        <div class="status-label">${item.label}</div>
+        <div class="status-value">${item.val}</div>
+      `;
+          rows.appendChild(row);
+        });
+
+        document.getElementById("lastRefresh").textContent =
+          "Updated " + new Date().toLocaleTimeString();
+
+        const pulse = document.getElementById("headerPulse");
+        const allOk = items.every(i => i.ok);
+        pulse.style.background = allOk ? "var(--green)" : "var(--yellow)";
+        pulse.style.boxShadow = allOk ? "0 0 6px var(--green)" : "0 0 6px var(--yellow)";
+
+        log(`Health: LiveKit=${d.livekit?.status} Kafka=${d.kafka?.status} GPU=${d.gpu?.available}`, "info");
+      } catch (e) {
+        log("Health check failed: " + e, "err");
+      }
+    }
+
+    // ── GPU ────────────────────────────────────────────────────────────────────
+    async function loadGpu() {
+      try {
+        const d = await apiFetch("/api/gpu");
+        document.getElementById("gpuMaxCalls").textContent = d.max_calls ?? d.fallback_max_calls ?? "—";
+        document.getElementById("gpuUtil").textContent = d.gpu_util_pct != null ? d.gpu_util_pct + "%" : "N/A";
+        document.getElementById("gpuPerCall").textContent = d.per_call_mb ?? "—";
+
+        if (d.vram_total_mb > 0) {
+          const pct = Math.round(d.vram_used_mb / d.vram_total_mb * 100);
+          document.getElementById("vramWrap").style.display = "block";
+          document.getElementById("vramFill").style.width = pct + "%";
+          document.getElementById("vramText").textContent =
+            `${d.vram_used_mb} / ${d.vram_total_mb} MB (${pct}%)`;
+          const modelNote = d.stt_model ? ` | STT: ${d.stt_model}${d.stt_auto ? " (auto)" : ""}` : "";
+          document.getElementById("gpuNote").textContent =
+            `GPU: ${d.gpu_name || "unknown"}${modelNote} | overhead: ${d.overhead_mb || "?"}MB`;
+        } else {
+          document.getElementById("vramWrap").style.display = "none";
+          const note = d.available === false
+            ? `No NVIDIA GPU — CPU fallback (max_calls=${d.fallback_max_calls ?? 4}). Error: ${d.error || ""}`
+            : "GPU found but VRAM info unavailable";
+          document.getElementById("gpuNote").textContent = note;
+        }
+      } catch (e) { log("GPU load failed: " + e, "err"); }
+    }
+
+    // ── Kafka Topics ───────────────────────────────────────────────────────────
+    async function loadKafka() {
+      try {
+        const d = await apiFetch("/api/kafka");
+        const tbody = document.getElementById("topicRows");
+        tbody.innerHTML = "";
+
+        if (d.status === "error") {
+          tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red);padding:12px">${d.error}</td></tr>`;
+          log("Kafka check failed: " + d.error, "err");
+          return;
+        }
+
+        Object.entries(d.topics).forEach(([name, status]) => {
+          const tr = document.createElement("tr");
+          const badge = status === "exists"
+            ? `<span class="badge badge-green">exists</span>`
+            : `<span class="badge badge-red">missing</span>`;
+          tr.innerHTML = `
+        <td style="color:var(--blue)">${name}</td>
+        <td style="color:var(--muted)">${TOPIC_ROLES[name] || ""}</td>
+        <td>${badge}</td>
+      `;
+          tbody.appendChild(tr);
+        });
+        log(`Kafka topics loaded: ${d.status}`, d.status === "ok" ? "ok" : "warn");
+      } catch (e) { log("Kafka topic check failed: " + e, "err"); }
+    }
+
+    // ── Queue Status ───────────────────────────────────────────────────────────
+    // Throttle: skip if called again within 10 seconds (each call creates a Kafka consumer)
+    let _queueLastFetch = 0;
+    async function loadQueueStatus() {
+      const now = Date.now();
+      if (now - _queueLastFetch < 10_000) return;  // skip if too recent
+      _queueLastFetch = now;
+      try {
+        const d = await apiFetch("/api/queue-status");
+        document.getElementById("queueDepth").textContent = d.queue_depth ?? "—";
+        document.getElementById("queueEta").textContent =
+          d.queue_depth != null ? (d.queue_depth * 120) : "—";
+        document.getElementById("queueNote").textContent =
+          d.status === "ok" ? "call_requests consumer lag (scheduler-group)" : (d.error || "");
+      } catch (e) { log("Queue status failed: " + e, "err"); }
+    }
+
+    // ── Pipeline Test ──────────────────────────────────────────────────────────
+    async function runPipelineTest() {
+      const steps = ["step-browser", "step-token", "step-kafka", "step-scheduler", "step-worker", "step-ai", "step-audio"];
+      steps.forEach(s => { document.getElementById(s).className = "flow-box"; });
+
+      const res = document.getElementById("pipelineResult");
+      res.innerHTML = '<span style="color:var(--muted)">Running Kafka round-trip test…</span>';
+      log("Starting Kafka pipeline round-trip test…", "info");
+
+      try {
+        document.getElementById("step-browser").className = "flow-box active";
+        document.getElementById("step-kafka").className = "flow-box active";
+
+        const d = await apiFetch("/api/pipeline-test", { method: "POST" });
+
+        steps.forEach(s => { document.getElementById(s).className = "flow-box"; });
+
+        if (d.success) {
+          document.getElementById("step-kafka").className = "flow-box active";
+          document.getElementById("step-scheduler").className = "flow-box active";
+          res.innerHTML = `
+        <span style="color:var(--green)">✓ Round-trip SUCCESS — ${d.latency_ms}ms</span>
+        <pre style="margin-top:6px;font-size:11px;color:var(--muted)">${JSON.stringify(d.steps, null, 2)}</pre>`;
+          log(`Kafka round-trip OK — ${d.latency_ms}ms`, "ok");
+        } else {
+          document.getElementById("step-kafka").className = "flow-box error";
+          res.innerHTML = `<span style="color:var(--red)">✗ Round-trip FAILED</span>
+        <pre style="margin-top:6px;font-size:11px;color:var(--muted)">${JSON.stringify(d.steps, null, 2)}</pre>`;
+          log("Kafka round-trip FAILED: " + JSON.stringify(d.steps), "err");
+        }
+      } catch (e) {
+        res.innerHTML = `<span style="color:var(--red)">Error: ${e}</span>`;
+        log("Pipeline test error: " + e, "err");
+      }
+    }
+
+    // ── Token ──────────────────────────────────────────────────────────────────
+    async function getToken() {
+      const lang = document.getElementById("tokenLang").value;
+      const llm = document.getElementById("tokenLlm").value;
+      log(`Requesting token lang=${lang} llm=${llm}…`, "info");
+      try {
+        const d = await apiFetch(`/api/token?lang=${lang}&llm=${llm}`);
+        if (d.error) { log(`Token error: ${d.error}`, "err"); return; }
+        if (!d.token || !d.room) { log("Token response missing fields", "err"); return; }
+
+        currentToken = d.token;
+        currentRoomId = d.room;
+
+        document.getElementById("tokenDisplay").textContent = d.token;
+        document.getElementById("roomInfo").innerHTML =
+          `Room: <span style="color:var(--blue)">${d.room}</span> &nbsp;
+       Session: <span style="color:var(--purple)">${d.session_id}</span><br>
+       URL: <span style="color:var(--muted)">${d.url}</span>`;
+        document.getElementById("connectBtn").disabled = false;
+
+        document.getElementById("step-token").className = "flow-box active";
+        log(`Token OK — room=${d.room.slice(0, 8)}… identity=${d.identity}`, "ok");
+      } catch (e) {
+        log("Token request failed: " + e, "err");
+      }
+    }
+
+    // ── LiveKit Connection ─────────────────────────────────────────────────────
+    async function connectLiveKit() {
+      if (!currentToken) { log("Get a token first", "warn"); return; }
+
+      // Load LiveKit SDK from CDN
+      if (!window.LivekitClient) {
+        log("Loading LiveKit client SDK…", "info");
+        await loadScript("https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js");
+      }
+
+      try {
+        const { Room, RoomEvent } = window.LivekitClient;
+        const room = new Room();
+
+        room.on(RoomEvent.Connected, () => {
+          log(`Connected to LiveKit room ${currentRoomId.slice(0, 8)}…`, "ok");
+          document.getElementById("connectionStatus").innerHTML =
+            `<span style="color:var(--green)">● Connected to room <span style="font-family:monospace">${currentRoomId.slice(0, 8)}…</span></span>`;
+          document.getElementById("step-worker").className = "flow-box active";
+        });
+        room.on(RoomEvent.Disconnected, () => {
+          log("Disconnected from LiveKit room", "warn");
+          document.getElementById("connectionStatus").textContent = "Disconnected";
+        });
+        room.on(RoomEvent.ParticipantConnected, p => {
+          log(`Participant joined: ${p.identity}`, "info");
+          if (p.identity.startsWith("ai-worker")) {
+            document.getElementById("step-ai").className = "flow-box active";
+            document.getElementById("step-audio").className = "flow-box active";
+            log("AI Worker joined the room — pipeline fully connected!", "ok");
+          }
+        });
+        room.on(RoomEvent.DataReceived, (payload, participant) => {
+          try {
+            const msg = JSON.parse(new TextDecoder().decode(payload));
+            log(`DataChannel [${msg.type}]: ${JSON.stringify(msg)}`, "info");
+            if (msg.type === "queue_update") {
+              document.getElementById("queueDepth").textContent = msg.position;
+              document.getElementById("queueEta").textContent = msg.eta_sec;
+            }
+          } catch (e) { }
+        });
+        room.on(RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === "audio") {
+            log("AI audio track subscribed — playing AI voice", "ok");
+            document.getElementById("step-audio").className = "flow-box active";
+            const el = new Audio();
+            track.attach(el);
+            el.play().catch(() => { });
+          }
+        });
+
+        const url = (await apiFetch("/api/config")).livekit_url;
+        await room.connect(url, currentToken);
+        currentRoom = room;
+
+        document.getElementById("connectBtn").style.display = "none";
+        document.getElementById("disconnectBtn").style.display = "block";
+        document.getElementById("audioNote").textContent = "Connected! Enable mic to test full-duplex audio.";
+      } catch (e) {
+        log("LiveKit connect failed: " + e, "err");
+        document.getElementById("step-worker").className = "flow-box error";
+      }
+    }
+
+    function disconnectLiveKit() {
+      if (currentRoom) { currentRoom.disconnect(); currentRoom = null; }
+      stopMic();
+      document.getElementById("connectBtn").style.display = "block";
+      document.getElementById("disconnectBtn").style.display = "none";
+      document.getElementById("connectionStatus").textContent = "Disconnected";
+    }
+
+    // ── Microphone test ────────────────────────────────────────────────────────
+    async function testMic() {
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        audioCtx = new AudioContext();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        audioCtx.createMediaStreamSource(micStream).connect(analyser);
+
+        document.getElementById("micBtn").style.display = "none";
+        document.getElementById("stopMicBtn").style.display = "block";
+        log("Microphone active — visualizing audio input", "ok");
+        drawViz();
+
+        if (currentRoom) {
+          const track = micStream.getAudioTracks()[0];
+          await currentRoom.localParticipant.publishTrack(track);
+          log("Microphone published to LiveKit room", "ok");
+        }
+      } catch (e) {
+        log("Microphone access failed: " + e, "err");
+      }
+    }
+
+    function stopMic() {
+      if (vizFrame) { cancelAnimationFrame(vizFrame); vizFrame = null; }
+      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+      if (audioCtx) { audioCtx.close(); audioCtx = null; }
+      document.getElementById("micBtn").style.display = "block";
+      document.getElementById("stopMicBtn").style.display = "none";
+      const c = document.getElementById("audioViz");
+      c.getContext("2d").clearRect(0, 0, c.width, c.height);
+    }
+
+    function drawViz() {
+      const canvas = document.getElementById("audioViz");
+      const ctx = canvas.getContext("2d");
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      canvas.width = canvas.clientWidth;
+
+      function draw() {
+        vizFrame = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(data);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const barW = canvas.width / data.length;
+        data.forEach((v, i) => {
+          const h = (v / 255) * canvas.height;
+          const hue = (i / data.length) * 240 + 200;
+          ctx.fillStyle = `hsl(${hue},80%,55%)`;
+          ctx.fillRect(i * barW, canvas.height - h, barW - 1, h);
+        });
+      }
+      draw();
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src; s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    async function checkAll() {
+      log("Running full system check…", "info");
+      await loadHealth();
+      await loadGpu();
+      await loadKafka();
+      await loadQueueStatus();
+      log("System check complete", "ok");
+    }
+
+    async function createTopics() {
+      log("Creating missing Kafka topics…", "info");
+      try {
+        const r = await fetch("/api/kafka/create-topics", { method: "POST" });
+        const d = await r.json();
+        if (d.status === "ok") {
+          const created = Object.entries(d.topics).filter(([, v]) => v === "created").map(([k]) => k);
+          const existed = Object.entries(d.topics).filter(([, v]) => v === "already_exists").map(([k]) => k);
+          if (created.length) log(`Created: ${created.join(", ")}`, "ok");
+          if (existed.length) log(`Already existed: ${existed.join(", ")}`, "info");
+          await loadKafka();
+        } else {
+          log(`Topic creation failed: ${d.error}`, "error");
+        }
+      } catch (e) { log(`Topic creation error: ${e}`, "error"); }
+    }
+
+    function refreshAll() {
+      loadHealth();
+      loadGpu();
+      loadKafka();
+      loadQueueStatus();
+    }
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+    window.addEventListener("DOMContentLoaded", () => {
+      refreshAll();
+      setInterval(refreshAll, 30000); // auto-refresh every 30s
+      log("Dashboard loaded — LiveKit + Kafka pipeline monitor ready", "ok");
+    });
+  </script>
+</body>
+
+</html>
