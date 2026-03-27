@@ -1,75 +1,53 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| add()                    |
-| * register new session   |
-+--------------------------+
-    |
-    |----> asyncio.Lock()  * thread-safe acquisition
-    |
-    |----> self._sessions.update()
-    |
-    v
-+--------------------------+
-| get()                    |
-| * sync lookup            |
-+--------------------------+
-    |
-    |----> self._sessions.get()
-    |
-    v
-+--------------------------+
-| cleanup_session()        |
-| * stop & deregister      |
-+--------------------------+
-    |
-    |----> remove()
-    |       |
-    |       ----> asyncio.Lock()
-    |       |
-    |       ----> self._sessions.pop()
-    |
-    |----> session.audio_source.stop()
-    |
-    |----> set session.closed = True
-    |
-    v
-+--------------------------+
-| cleanup_all()            |
-| * server shutdown hook   |
-+--------------------------+
-    |
-    |----> list(self._sessions.keys())
-    |
-    |----> [LOOP] -> cleanup_session()
-    |
-[ END ]
-"""
-# ==========================================================
-# APPLICATION FLOW OVERVIEW
-# ==========================================================
-# 1. LiveKitSessionManager     -> Async-safe registry of all active sessions
-# 2. add()                     -> Register new session, log total count
-# 3. get()                     -> Synchronous lookup by session_id
-# 4. remove()                  -> Deregister session without closing resources
-# 5. cleanup_session()         -> Stop audio pump + mark closed + remove
-# 6. cleanup_all()             -> Shutdown hook — close every active session
-#
-# PIPELINE FLOW
-# ai_worker_task() creates LiveKitSession
-#    ||
-# livekit_session_manager.add(session)
-#    ||
-# ... call runs: audio loop, process_turn, etc. ...
-#    ||
-# hangup / disconnect -> session.closed = True
-#    ||
-# livekit_session_manager.cleanup_session() -> audio_source.stop() -> remove()
-#    ||
-# livekit_session_manager (singleton) shared by all worker tasks + /health
-# ==========================================================
+
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | add()                    |
+# | * register new session   |
+# +--------------------------+
+#     |
+#     |----> asyncio.Lock()  * thread-safe acquisition
+#     |
+#     |----> self._sessions.update()
+#     |
+#     v
+# +--------------------------+
+# | get()                    |
+# | * sync lookup            |
+# +--------------------------+
+#     |
+#     |----> self._sessions.get()
+#     |
+#     v
+# +--------------------------+
+# | cleanup_session()        |
+# | * stop & deregister      |
+# +--------------------------+
+#     |
+#     |----> remove()
+#     |       |
+#     |       ----> asyncio.Lock()
+#     |       |
+#     |       ----> self._sessions.pop()
+#     |
+#     |----> session.audio_source.stop()
+#     |
+#     |----> set session.closed = True
+#     |
+#     v
+# +--------------------------+
+# | cleanup_all()            |
+# | * server shutdown hook   |
+# +--------------------------+
+#     |
+#     |----> list(self._sessions.keys())
+#     |
+#     |----> [LOOP] -> cleanup_session()
+#     |
+# [ END ]
+
+
 
 import asyncio
 import logging
@@ -80,25 +58,8 @@ from .livekit_session import LiveKitSession
 logger = logging.getLogger("callcenter.livekit.sessions")
 
 
-# --------------------------------------------------
-# LiveKitSessionManager -> Registry for active LiveKit AI worker sessions
-#    ||
-# add / remove / get -> Registry operations (asyncio.Lock-protected)
-#    ||
-# cleanup_session -> close audio source + mark closed + remove
-# --------------------------------------------------
 class LiveKitSessionManager:
-    """
-    Async-safe registry for LiveKit AI worker sessions.
 
-    Usage inside a worker task:
-        session = LiveKitSession(...)
-        await livekit_session_manager.add(session)
-        try:
-            ...
-        finally:
-            await livekit_session_manager.cleanup_session(session.session_id)
-    """
 
     def __init__(self) -> None:
         self._sessions: Dict[str, LiveKitSession] = {}
@@ -133,10 +94,7 @@ class LiveKitSessionManager:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def cleanup_session(self, session_id: str) -> None:
-        """
-        Stop the session's audio source pump, mark closed, and remove from
-        registry.  Safe to call multiple times — guarded by session.closed.
-        """
+        
         session = await self.remove(session_id)
         if session is None:
             return   # already removed

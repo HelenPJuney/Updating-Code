@@ -1,22 +1,40 @@
-"""
-SIP Session Manager — maps SIP call_id ↔ session_id ↔ room_id.
-
-This mapping layer is critical for:
-    • Tracking active SIP calls end-to-end
-    • Correlating LiveKit room events to SIP call state
-    • Handling disconnect/hangup events from either side
-    • Metrics and logging
-
-Thread-safety:
-    All mutations are protected by an asyncio.Lock so concurrent webhook
-    calls don't corrupt state.
-
-Call states:
-    ringing    → SIP INVITE received, room being created
-    connected  → AI worker joined, audio flowing
-    completed  → Call ended normally (SIP BYE or AI hangup)
-    failed     → Call setup or runtime failure
-"""
+# [ START: Call Discovered ]
+#     |
+#     v
+# +-------------------------------------------------+
+# | register()                                      |
+# | * Initializes SipSession (State: RINGING)       |
+# | * Saves to _by_sip_call, _by_session, _by_room  |
+# +-------------------------------------------------+
+#     |
+#     |=== (Read Data / Lookups) ======================
+#     |      |
+#     |      |--> get_by_sip_call()
+#     |      |--> get_by_session()
+#     |      |--> get_by_room()
+#     |      |--> to_dict_list()
+#     |      |--> get_all_active()
+#     |
+#     |=== (State Transitions) ========================
+#     |      |
+#     |      |--> mark_connected() --+
+#     |      |                       |
+#     |      |--> mark_completed() --+---> update_state() ---> SipSession.transition()
+#     |      |                       |
+#     |      |--> mark_failed() -----+
+#     |
+#     v
+# [ EVENT: Call Teardown ]
+#     |
+#     |--> remove_by_room() ---+ [ Extracts session_id ]
+#     |                        |
+#     |                        v
+#     |                  +-------------------------------------------------+
+#     +----------------> | remove()                                        |
+#                        | * Deletes from all 3 dictionaries               |
+#                        +-------------------------------------------------+
+#                              |
+#               [ END: Session Destroyed ]
 
 import asyncio
 import logging
@@ -56,6 +74,7 @@ class SipSession:
     session_id:   str
     room_id:      str
     state:        SipCallState = SipCallState.RINGING
+    source:       str = "inbound"  # "inbound" or "outbound"
 
     caller_number:           str = ""
     created_at:              float = field(default_factory=time.time)
@@ -100,6 +119,7 @@ class SipSessionManager:
         room_id:     str,
         caller_number: str = "",
         participant_id: str = "",
+        source: str = "inbound",
     ) -> SipSession:
         """
         Create and register a new SIP session mapping.
@@ -119,6 +139,7 @@ class SipSessionManager:
                 room_id=room_id,
                 caller_number=caller_number,
                 livekit_participant_id=participant_id,
+                source=source,
             )
             self._by_sip_call[sip_call_id] = sess
             self._by_session[session_id]   = sess

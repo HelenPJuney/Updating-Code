@@ -1,0 +1,52 @@
+.list { display: flex; flex-direction: column; gap: 2px; }
+
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(99,102,241,0.06);
+}
+.agent:last-child { border-bottom: none; }
+
+.dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.online  { background: var(--emerald); box-shadow: 0 0 6px rgba(16,185,129,0.6); }
+.offline { background: var(--muted); }
+
+.info { flex: 1; min-width: 0; }
+
+.name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skills {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.skillChip {
+  font-size: 9px !important;
+  padding: 1px 6px !important;
+}
+
+.slots {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+
+.slotsVal { font-size: 15px; font-weight: 700; color: var(--indigo); }
+.slotsSep { font-size: 12px; color: var(--muted); }
+.slotsMax { font-size: 12px; color: var(--muted); }

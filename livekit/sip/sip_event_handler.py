@@ -1,31 +1,64 @@
-"""
-SIP Event Handler — processes LiveKit room events for SIP-originated calls.
-
-This module reacts to LiveKit webhook events and maps them to:
-    • Kafka lifecycle topics (call_started, call_completed, call_failed)
-    • SipSession state transitions
-    • LiveKit room cleanup
-    • IVR recording persistence
-
-Supported events:
-    room_started           → Log; room creation is handled by LiveKit SIP
-    participant_joined     → Detect SIP caller, trigger AI worker via Kafka
-    participant_left       → Detect SIP caller hangup, trigger cleanup
-    room_finished          → Final cleanup of SIP session mapping
-    track_published        → Detect audio track from SIP caller → mark connected
-
-The handler does NOT modify the AI pipeline — it only bridges SIP events
-to the existing Kafka-based call scheduling system.
-
-Failover:
-    If Kafka is unavailable, ai_worker_task is spawned directly (same
-    fallback mechanism as /livekit/token endpoint).
-
-Call Timeouts:
-    • Ringing timeout: if no AI worker joins within SIP_RINGING_TIMEOUT_SEC,
-      the call is marked FAILED and cleaned up.
-    • Max call duration: SIP_CALL_TIMEOUT_SEC forces call end.
-"""
+# [ START: LiveKit Webhook Events ]
+#     |
+#     +-----> on_room_started() / on_track_published() [ Logs Only ]
+#     |
+#     v
+# +-------------------------------------------------+
+# | on_participant_joined()                         |
+# | * Main entry point for both Caller and AI       |
+# +-------------------------------------------------+
+#     |
+#     |--- (If SIP Caller Joins)
+#     |      |
+#     |      |----> sip_session_mgr.register()
+#     |      |----> _start_ringing_timeout() ----------+--> _ringing_watchdog() [If AI doesn't join]
+#     |      |                                         |      |--> sip_session_mgr.mark_failed()
+#     |      v                                         |      |--> _publish_sip_call_failed()
+#     |  _publish_sip_call_request()                   |      +--> _delayed_room_cleanup()
+#     |      |                                         |
+#     |      +--> [If Kafka fails]                     |
+#     |             |--> _fallback_direct_spawn()      |
+#     |                                                |
+#     |--- (If AI Worker Joins)                        |
+#            |                                         |
+#            |----> sip_session_mgr.mark_connected()   |
+#            |----> _cancel_timeout() <----------------+ [Stops ringing watchdog]
+#            |----> _start_call_timeout() -------------+
+#                                                      |
+#                                                      v
+# [ ACTIVE CALL IN PROGRESS ]                  _call_watchdog() [If call hits max duration]
+#     |                                                |
+#     v                                                |--> sip_session_mgr.mark_completed()
+# +-------------------------------------------------+  |--> _publish_sip_call_completed()
+# | on_participant_left()                           |  +--> _delayed_room_cleanup()
+# | * Triggered when SIP caller hangs up            |  |
+# +-------------------------------------------------+  |
+#     |                                                |
+#     |----> _cancel_timeout() <-----------------------+ [Stops max duration watchdog]
+#     |----> sip_session_mgr.mark_completed()
+#     |----> _publish_sip_call_completed()
+#     |----> _trigger_recording_save()
+#     |
+#     v
+# +-------------------------------------------------+
+# | _delayed_room_cleanup()                         |
+# | * Waits 2 seconds, then destroys room           |
+# +-------------------------------------------------+
+#     |
+#     |----> LiveKitAPI.delete_room()
+#     |----> sip_session_mgr.remove()
+#     |
+#     v
+# +-------------------------------------------------+
+# | on_room_finished()                              |
+# | * Final safety net if LiveKit destroys room     |
+# +-------------------------------------------------+
+#     |
+#     |----> _cancel_timeout()
+#     |----> sip_session_mgr.mark_completed()
+#     |----> sip_session_mgr.remove()
+#     |
+# [ END ]
 
 import asyncio
 import logging
@@ -87,17 +120,7 @@ class SipEventHandler:
         participant_sid: str,
         participant_metadata: str = "",
     ) -> Optional[SipSession]:
-        """
-        Called when a participant joins a LiveKit room.
-
-        If the participant is a SIP caller (identity starts with SIP_PARTICIPANT_PREFIX):
-            1. Generate session_id
-            2. Create SipSession mapping
-            3. Publish CallRequest to Kafka → triggers AI worker dispatch
-            4. Start ringing timeout watchdog
-
-        Returns SipSession if a SIP call was initiated, None otherwise.
-        """
+      
         # Only handle SIP participants
         if not participant_identity.startswith(SIP_PARTICIPANT_PREFIX):
             logger.debug(
@@ -118,17 +141,22 @@ class SipEventHandler:
                 )
             return None
 
-        # Check if already registered (idempotent)
+        # Check if already registered (idempotent for inbound, completes connection for outbound)
         existing = sip_session_mgr.get_by_room(room_name)
         if existing:
             logger.debug(
                 "[SipHandler] SIP session already exists  room=%s  session=%s",
                 room_name[:12], existing.session_id[:8],
             )
+            # For outbound calls, when the PSTN user joins, ensure we mark connected
+            if existing.state == SipCallState.RINGING:
+                await sip_session_mgr.mark_connected(existing.session_id)
+                _cancel_timeout(existing.session_id)
+                _start_call_timeout(existing)
+                logger.info("[SipHandler] outbound SIP caller joined → connected session=%s", existing.session_id[:8])
             return existing
 
-        # Extract caller info from participant identity
-        # LiveKit SIP sets identity as: sip_<phone_number> or sip_<sip_uri>
+
         caller_number = participant_identity.removeprefix(SIP_PARTICIPANT_PREFIX)
 
         # Generate internal identifiers
@@ -145,15 +173,22 @@ class SipEventHandler:
             participant_id=participant_identity,
         )
 
-        # Start ringing timeout — if no AI worker joins within N seconds, fail
-        _start_ringing_timeout(sip_session)
-
         # Publish CallRequest to Kafka (same path as /livekit/token)
-        await _publish_sip_call_request(
+        success = await _publish_sip_call_request(
             session_id=session_id,
             room_id=room_name,
             caller_number=caller_number,
         )
+
+        if not success:
+            _cancel_timeout(session_id)
+            await sip_session_mgr.mark_failed(session_id)
+            await _publish_sip_call_failed(sip_session, "dispatch_failed")
+            asyncio.ensure_future(_delayed_room_cleanup(sip_session))
+            return None
+
+        # Start ringing timeout — if no AI worker joins within N seconds, fail
+        _start_ringing_timeout(sip_session)
 
         logger.info(
             "[SipHandler] SIP call initiated  caller=%s  session=%s  room=%s",
@@ -314,7 +349,12 @@ async def _publish_sip_call_request(
     session_id: str,
     room_id: str,
     caller_number: str,
-) -> None:
+    lang: str = SIP_DEFAULT_LANG,
+    llm: str = SIP_DEFAULT_LLM,
+    voice: str = SIP_DEFAULT_VOICE,
+    agent_name: str = SIP_DEFAULT_AGENT_NAME,
+    source: str = "sip",
+) -> bool:
     """
     Publish a CallRequest to Kafka for a SIP-originated call.
 
@@ -332,12 +372,12 @@ async def _publish_sip_call_request(
     req = CallRequest(
         session_id=session_id,
         room_id=room_id,
-        lang=SIP_DEFAULT_LANG,
-        llm=SIP_DEFAULT_LLM,
-        voice=SIP_DEFAULT_VOICE,
+        lang=lang,
+        llm=llm,
+        voice=voice,
         model_path="",
-        agent_name=SIP_DEFAULT_AGENT_NAME,
-        source="sip",
+        agent_name=agent_name,
+        source=source,
         caller_number=caller_number,
     )
 
@@ -351,15 +391,15 @@ async def _publish_sip_call_request(
                         "[SipBridge] CallRequest published to Kafka  session=%s  room=%s",
                         session_id[:8], room_id[:8],
                     )
-                    return
+                    return True
                 else:
                     # Kafka returned None — use fallback direct spawn
                     await _fallback_direct_spawn(req)
-                    return
+                    return True
             else:
                 # Kafka not active — fallback to direct spawn
                 await _fallback_direct_spawn(req)
-                return
+                return True
 
         except Exception as exc:
             last_exc = exc
@@ -378,11 +418,13 @@ async def _publish_sip_call_request(
 
     try:
         await _fallback_direct_spawn(req)
+        return True
     except Exception:
         logger.exception(
             "[SipBridge] Fallback spawn also failed  session=%s", session_id[:8]
         )
         await sip_session_mgr.mark_failed(session_id)
+        return False
 
 
 async def _fallback_direct_spawn(req) -> None:

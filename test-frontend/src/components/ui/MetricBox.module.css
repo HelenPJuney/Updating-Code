@@ -1,0 +1,36 @@
+.box {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-align: center;
+  transition: all 0.2s;
+}
+.box:hover { background: rgba(255,255,255,0.04); }
+
+.value {
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.md  { font-size: 26px; }
+.lg  { font-size: 36px; }
+.sm  { font-size: 18px; }
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Colors */
+.indigo .value { color: var(--indigo); }
+.emerald .value { color: var(--emerald); }
+.rose .value { color: var(--rose); }
+.amber .value { color: var(--amber); }
+.cyan .value { color: var(--cyan); }
+.violet .value { color: var(--violet); }
+.muted .value { color: var(--muted); }

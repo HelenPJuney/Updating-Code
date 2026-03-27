@@ -1,0 +1,136 @@
+{
+  "_comment": "Skills-based routing rules. Evaluated in ascending priority order (lower = first).",
+  "rules": [
+    {
+      "name": "vip_caller",
+      "priority": 1,
+      "enabled": true,
+      "conditions": {
+        "caller_number_prefix": ["+1800", "+1888", "+1877"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "vip",
+        "priority_override": 10,
+        "required_skills": [],
+        "ai_config": {
+          "llm": "gemini",
+          "voice": "",
+          "agent_name": "VIP Assistant"
+        },
+        "fallback_action": "ai_bot"
+      }
+    },
+    {
+      "name": "spanish_caller",
+      "priority": 2,
+      "enabled": true,
+      "conditions": {
+        "lang": ["es"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "spanish",
+        "priority_override": 5,
+        "required_skills": ["spanish"],
+        "ai_config": {
+          "llm": "gemini",
+          "voice": "",
+          "agent_name": "Asistente"
+        },
+        "fallback_action": "ai_bot"
+      }
+    },
+    {
+      "name": "hindi_caller",
+      "priority": 3,
+      "enabled": true,
+      "conditions": {
+        "lang": ["hi"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "hindi",
+        "priority_override": 5,
+        "required_skills": ["hindi"],
+        "ai_config": {
+          "llm": "gemini",
+          "voice": "",
+          "agent_name": "सहायक"
+        },
+        "fallback_action": "ai_bot"
+      }
+    },
+    {
+      "name": "sip_inbound_priority",
+      "priority": 10,
+      "enabled": true,
+      "conditions": {
+        "source": ["sip"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "sip",
+        "priority_override": 3,
+        "required_skills": [],
+        "ai_config": {},
+        "fallback_action": "voicemail"
+      }
+    },
+    {
+      "name": "scheduled_outbound",
+      "priority": 15,
+      "enabled": true,
+      "conditions": {
+        "source": ["sip_outbound"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "outbound",
+        "priority_override": 5,
+        "required_skills": [],
+        "ai_config": {},
+        "fallback_action": "callback"
+      }
+    },
+    {
+      "name": "after_hours",
+      "priority": 20,
+      "enabled": true,
+      "conditions": {
+        "time_of_day_utc_outside": ["08:00", "20:00"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "after_hours",
+        "priority_override": 0,
+        "required_skills": [],
+        "ai_config": {
+          "agent_name": "Night Assistant"
+        },
+        "fallback_action": "voicemail"
+      }
+    },
+    {
+      "name": "default",
+      "priority": 999,
+      "enabled": true,
+      "conditions": {},
+      "target": {
+        "queue_name": "default",
+        "priority_override": null,
+        "required_skills": [],
+        "ai_config": {},
+        "fallback_action": "queue"
+      }
+    }
+  ],
+  "agent_skill_map": {
+    "spanish":  ["es"],
+    "hindi":    ["hi"],
+    "billing":  [],
+    "technical": [],
+    "tier1":    [],
+    "tier2":    []
+  }
+}

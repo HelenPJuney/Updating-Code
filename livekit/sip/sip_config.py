@@ -1,46 +1,4 @@
-"""
-SIP configuration — environment variables and feature flags.
 
-All SIP-related env vars are centralised here.  The ENABLE_SIP flag gates
-the entire SIP module; when False, no SIP routes are mounted and no webhook
-listener is started.
-
-Environment Variables:
-    Feature:
-        ENABLE_SIP              — "true" to activate (default: "false")
-
-    LiveKit SIP:
-        SIP_TRUNK_ID            — LiveKit SIP trunk identifier
-        SIP_DISPATCH_RULE_ID    — LiveKit SIP dispatch rule ID
-
-    Security:
-        SIP_WEBHOOK_SECRET      — HMAC secret for validating LiveKit webhooks
-        SIP_ENFORCE_SIGNATURE   — Reject unsigned webhooks (default: "false" for dev)
-        SIP_RATE_LIMIT_MAX      — Max SIP webhook hits per window (default: 60)
-        SIP_RATE_LIMIT_WINDOW   — Rate limit window in seconds (default: 60)
-        SIP_ALLOWED_CALLERS     — Comma-separated allowed caller IDs (empty = all)
-
-    Defaults for SIP Calls:
-        SIP_DEFAULT_LANG        — Default language (default: "en")
-        SIP_DEFAULT_LLM         — Default LLM (default: "gemini")
-        SIP_DEFAULT_VOICE       — Default TTS voice stem
-        SIP_DEFAULT_AGENT_NAME  — AI agent display name (default: "Assistant")
-
-    Call Behaviour:
-        SIP_AUTO_ANSWER         — Auto-answer incoming SIP calls (default: "true")
-        SIP_CALL_TIMEOUT_SEC    — Max call duration before force-end (default: 3600)
-        SIP_RINGING_TIMEOUT_SEC — Time before ringing call is considered dead (default: 30)
-
-    Retry:
-        SIP_RETRY_MAX           — Max retries for SIP-to-Kafka bridge (default: 3)
-        SIP_RETRY_DELAY_SEC     — Base retry delay in seconds (default: 1.0)
-
-    Asterisk / Media:
-        ASTERISK_SIP_HOST       — Asterisk SIP server address (default: "localhost")
-        ASTERISK_SIP_PORT       — Asterisk SIP port (default: 5060)
-        SIP_RTP_PORT_START      — RTP port range start (default: 10000)
-        SIP_RTP_PORT_END        — RTP port range end (default: 20000)
-"""
 
 import os
 

@@ -1,89 +1,67 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| TtsAudioSource()         |
-| * initialize rtc.Source  |
-+--------------------------+
-    |
-    |----> asyncio.Queue() * init _queue
-    |
-    v
-+--------------------------+
-| start()                  |
-| * launch background task |
-+--------------------------+
-    |
-    |----> asyncio.ensure_future() -> _pump()
-    |
-    v
-+--------------------------+
-| push_tts_wav()           |
-| * accept Piper audio     |
-+--------------------------+
-    |
-    |----> wav_bytes_to_pcm()
-    |
-    |----> resample_audio() * to 48kHz
-    |
-    |----> float32_to_int16()
-    |
-    |----> self._queue.put_nowait() * slice into 20ms chunks
-    |
-    v
-+--------------------------+
-| _pump()                  |
-| * continuous loop        |
-+--------------------------+
-    |
-    |----> self._queue.get()
-    |
-    |----> <rtc.AudioFrame> -> init()
-    |
-    |----> <rtc.AudioSource> -> capture_frame()
-    |
-    v
-+--------------------------+
-| clear()                  |
-| * barge-in handler       |
-+--------------------------+
-    |
-    |----> self._queue.get_nowait() * drain until empty
-    |
-    |----> return drained_count
-    |
-    v
-+--------------------------+
-| stop()                   |
-| * cleanup session        |
-+--------------------------+
-    |
-    |----> self._task.cancel()
-    |
-[ END ]
-"""
-# ==========================================================
-# APPLICATION FLOW OVERVIEW
-# ==========================================================
-# 1. TtsAudioSource            -> Outbound LiveKit TTS audio queue + pump
-# 2. start()                   -> Launch _pump() coroutine background task
-# 3. push_tts_wav()            -> Decode WAV, resample 48kHz, enqueue chunks
-# 4. _pump()                   -> Pull 20ms frames, forward to capture_frame()
-# 5. clear()                   -> Drain queue on barge-in, return frame count
-# 6. stop()                    -> Signal pump to exit on session close
-#
-# PIPELINE FLOW
-# _piper_sync() returns WAV bytes
-#    ||
-# push_tts_wav() -> wav_bytes_to_pcm -> resample_audio -> float32_to_int16
-#    ||
-# Slice into 960-sample (20ms) chunks -> queue.put_nowait()
-#    ||
-# _pump() -> rtc.AudioFrame -> source.capture_frame() -> LiveKit sends audio
-#    ||
-# barge-in -> clear() -> returns drained count -> _trim_last_ai_turn()
-# ==========================================================
+
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | TtsAudioSource()         |
+# | * initialize rtc.Source  |
+# +--------------------------+
+#     |
+#     |----> asyncio.Queue() * init _queue
+#     |
+#     v
+# +--------------------------+
+# | start()                  |
+# | * launch background task |
+# +--------------------------+
+#     |
+#     |----> asyncio.ensure_future() -> _pump()
+#     |
+#     v
+# +--------------------------+
+# | push_tts_wav()           |
+# | * accept Piper audio     |
+# +--------------------------+
+#     |
+#     |----> wav_bytes_to_pcm()
+#     |
+#     |----> resample_audio() * to 48kHz
+#     |
+#     |----> float32_to_int16()
+#     |
+#     |----> self._queue.put_nowait() * slice into 20ms chunks
+#     |
+#     v
+# +--------------------------+
+# | _pump()                  |
+# | * continuous loop        |
+# +--------------------------+
+#     |
+#     |----> self._queue.get()
+#     |
+#     |----> <rtc.AudioFrame> -> init()
+#     |
+#     |----> <rtc.AudioSource> -> capture_frame()
+#     |
+#     v
+# +--------------------------+
+# | clear()                  |
+# | * barge-in handler       |
+# +--------------------------+
+#     |
+#     |----> self._queue.get_nowait() * drain until empty
+#     |
+#     |----> return drained_count
+#     |
+#     v
+# +--------------------------+
+# | stop()                   |
+# | * cleanup session        |
+# +--------------------------+
+#     |
+#     |----> self._task.cancel()
+#     |
+# [ END ]
 
 import asyncio
 import logging
@@ -100,30 +78,7 @@ _SR            = 48_000       # LiveKit / WebRTC output sample rate (Hz)
 _FRAME_SAMPLES = 960          # 20 ms per frame at 48 kHz (standard Opus)
 _MAX_QUEUE     = 500          # ≈ 10 s of buffered audio
 
-
-# --------------------------------------------------
-# TtsAudioSource -> LiveKit outbound TTS audio queue + pump
-#    ||
-# push_tts_wav -> Decode Piper WAV, resample 48kHz, enqueue 20ms chunks
-#    ||
-# _pump -> capture_frame() each chunk into livekit.rtc.AudioSource
-#    ||
-# clear -> Drain queue on barge-in (returns frame count for recording trim)
-# --------------------------------------------------
 class TtsAudioSource:
-    """
-    Outbound audio source for the LiveKit AI worker.
-
-    Usage:
-        src = TtsAudioSource()
-        track = rtc.LocalAudioTrack.create_audio_track("ai-voice", src.source)
-        await room.local_participant.publish_track(track)
-        src.start()                         # begin pumping frames
-        ...
-        await src.push_tts_wav(piper_bytes) # called after _piper_sync
-        src.clear()                         # on barge-in
-        src.stop()                          # on session close
-    """
 
     def __init__(self) -> None:
         from livekit import rtc
@@ -157,20 +112,8 @@ class TtsAudioSource:
 
     # ── Internal pump ─────────────────────────────────────────────────────────
 
-    # --------------------------------------------------
-    # _pump -> Continuously pull frames from queue, push to LiveKit source
-    #    ||
-    # asyncio.wait_for(queue.get) -> rtc.AudioFrame -> source.capture_frame()
-    # --------------------------------------------------
     async def _pump(self) -> None:
-        """
-        Pull 20ms int16 chunks from the queue and feed them to the LiveKit
-        AudioSource via capture_frame().
-
-        capture_frame() is naturally paced by LiveKit's internal clock — it
-        returns only when the source's buffer has room for the next frame,
-        which happens at exactly the 20ms cadence.  No explicit sleep needed.
-        """
+  
         from livekit import rtc
 
         while not self._closed:
@@ -200,20 +143,8 @@ class TtsAudioSource:
 
     # ── TTS integration ───────────────────────────────────────────────────────
 
-    # --------------------------------------------------
-    # push_tts_wav -> Accept Piper WAV bytes, convert, enqueue for _pump
-    #    ||
-    # wav_bytes_to_pcm -> resample_audio -> float32_to_int16
-    #    ||
-    # Slice into 960-sample chunks -> queue.put_nowait each
-    # --------------------------------------------------
     async def push_tts_wav(self, wav_bytes: bytes) -> None:
-        """
-        Accept WAV bytes from _piper_sync, resample to 48 kHz int16, and
-        enqueue as 20ms chunks for the _pump() coroutine to deliver.
-
-        Identical interface to the old AIResponseTrack.push_tts_wav().
-        """
+     
         try:
             pcm_f32, native_sr = wav_bytes_to_pcm(wav_bytes)
         except Exception:
@@ -246,20 +177,8 @@ class TtsAudioSource:
 
     # ── Barge-in support ──────────────────────────────────────────────────────
 
-    # --------------------------------------------------
-    # clear -> Drain the outbound queue on barge-in
-    #    ||
-    # get_nowait loop -> Returns count of drained frames for recording trim
-    # --------------------------------------------------
     def clear(self) -> int:
-        """
-        Drain the outbound queue so the AI voice stops instantly on barge-in.
-
-        Returns the number of drained frames so the caller can trim the
-        recording to only the portion that was actually played.
-
-        Identical interface to the old AIResponseTrack.clear().
-        """
+      
         drained = 0
         while True:
             try:

@@ -1,35 +1,35 @@
-"""
-[ START ]
-    |
-    v
-+------------------------+
-| kafka_lifespan()       |
-| * app context manager  |
-+------------------------+
-    |
-    |----> start_kafka_producer()
-    |           |
-    |           ----> <Producer> -> get_producer()
-    |           |
-    |           ----> <Producer> -> start()
-    v
-+------------------------+
-| yield                  |
-| * app running state    |
-+------------------------+
-    |
-    v
-+------------------------+
-| stop_kafka_producer()  |
-| * shutdown cleanup     |
-+------------------------+
-    |
-    |----> <Producer> -> get_producer()
-    |           |
-    |           ----> <Producer> -> stop()
-    |
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +------------------------+
+# | kafka_lifespan()       |
+# | * app context manager  |
+# +------------------------+
+#     |
+#     |----> start_kafka_producer()
+#     |           |
+#     |           ----> <Producer> -> get_producer()
+#     |           |
+#     |           ----> <Producer> -> start()
+#     v
+# +------------------------+
+# | yield                  |
+# | * app running state    |
+# +------------------------+
+#     |
+#     v
+# +------------------------+
+# | stop_kafka_producer()  |
+# | * shutdown cleanup     |
+# +------------------------+
+#     |
+#     |----> <Producer> -> get_producer()
+#     |           |
+#     |           ----> <Producer> -> stop()
+#     |
+# [ END ]
+
 import logging
 from contextlib import asynccontextmanager
 

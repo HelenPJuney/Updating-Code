@@ -1,37 +1,37 @@
-"""
-[ START ]
-    |
-    v
-+------------------------+
-| _metric()              |
-| * initialize metrics   |
-+------------------------+
-    |
-    |----> _NoOpMetric() * fallback if prometheus missing
-    |
-    v
-+------------------------+
-| kafka_health()         |
-| * GET /health          |
-+------------------------+
-    |
-    |----> get_producer()
-    |           |
-    |           ----> .is_kafka_active
-    v
-+------------------------+
-| kafka_metrics()        |
-| * GET /metrics         |
-+------------------------+
-    |
-    |----> generate_latest()
-    |           |
-    |           ----> <Prometheus> -> text output
-    |----> _Response()
-    |
-    v
-[ YIELD ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +------------------------+
+# | _metric()              |
+# | * initialize metrics   |
+# +------------------------+
+#     |
+#     |----> _NoOpMetric() * fallback if prometheus missing
+#     |
+#     v
+# +------------------------+
+# | kafka_health()         |
+# | * GET /health          |
+# +------------------------+
+#     |
+#     |----> get_producer()
+#     |           |
+#     |           ----> .is_kafka_active
+#     v
+# +------------------------+
+# | kafka_metrics()        |
+# | * GET /metrics         |
+# +------------------------+
+#     |
+#     |----> generate_latest()
+#     |           |
+#     |           ----> <Prometheus> -> text output
+#     |----> _Response()
+#     |
+#     v
+# [ YIELD ]
+
 import logging
 import time
 from typing import Optional

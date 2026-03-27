@@ -1,62 +1,62 @@
-"""
-[ START ]
-    |
-    v
-+-----------------------------+
-| _main()                     |
-| * global entry point        |
-+-----------------------------+
-    |
-    |----> <CallScheduler> -> run()
-    |           |
-    |           ----> <CallScheduler> -> start()
-    |           |           |
-    |           |           ----> <AIOKafkaConsumer> -> start()
-    |           |           |
-    |           |           ----> <AIOKafkaProducer> -> start()
-    |           |           |
-    |           |           ----> <QueueNotifier> -> start()
-    |           |
-    |           ----> asyncio.TaskGroup()
-    |                       |
-    |                       |----> _consume_call_requests()
-    |                       |           |
-    |                       |           ----> _select_best_node()
-    |                       |           |
-    |                       |           ----> _assign_call()
-    |                       |           |
-    |                       |           ----> <AIOKafkaConsumer> -> pause()
-    |                       |
-    |                       |----> _consume_events()
-    |                       |           |
-    |                       |           ----> _on_gpu_capacity()
-    |                       |           |
-    |                       |           ----> _on_heartbeat()
-    |                       |           |
-    |                       |           ----> _on_call_finished()
-    |                       |           |
-    |                       |           ----> _resume_paused_partitions()
-    |                       |
-    |                       |----> _dead_node_watchdog()
-    |                       |
-    |                       |----> _periodic_queue_broadcast()
-    |                                   |
-    |                                   ----> _refresh_lag_cache()
-    |                                   |
-    |                                   ----> <QueueNotifier> -> 
-    |                                         broadcast_queue_positions()
-    v
-+-----------------------------+
-| <CallScheduler> -> stop()   |
-| * cleanup and shutdown      |
-+-----------------------------+
-    |
-    |----> <AIOKafka> -> stop()
-    |
-    |----> <QueueNotifier> -> stop()
-    |
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +-----------------------------+
+# | _main()                     |
+# | * global entry point        |
+# +-----------------------------+
+#     |
+#     |----> <CallScheduler> -> run()
+#     |           |
+#     |           ----> <CallScheduler> -> start()
+#     |           |           |
+#     |           |           ----> <AIOKafkaConsumer> -> start()
+#     |           |           |
+#     |           |           ----> <AIOKafkaProducer> -> start()
+#     |           |           |
+#     |           |           ----> <QueueNotifier> -> start()
+#     |           |
+#     |           ----> asyncio.TaskGroup()
+#     |                       |
+#     |                       |----> _consume_call_requests()
+#     |                       |           |
+#     |                       |           ----> _select_best_node()
+#     |                       |           |
+#     |                       |           ----> _assign_call()
+#     |                       |           |
+#     |                       |           ----> <AIOKafkaConsumer> -> pause()
+#     |                       |
+#     |                       |----> _consume_events()
+#     |                       |           |
+#     |                       |           ----> _on_gpu_capacity()
+#     |                       |           |
+#     |                       |           ----> _on_heartbeat()
+#     |                       |           |
+#     |                       |           ----> _on_call_finished()
+#     |                       |           |
+#     |                       |           ----> _resume_paused_partitions()
+#     |                       |
+#     |                       |----> _dead_node_watchdog()
+#     |                       |
+#     |                       |----> _periodic_queue_broadcast()
+#     |                                   |
+#     |                                   ----> _refresh_lag_cache()
+#     |                                   |
+#     |                                   ----> <QueueNotifier> -> 
+#     |                                         broadcast_queue_positions()
+#     v
+# +-----------------------------+
+# | <CallScheduler> -> stop()   |
+# | * cleanup and shutdown      |
+# +-----------------------------+
+#     |
+#     |----> <AIOKafka> -> stop()
+#     |
+#     |----> <QueueNotifier> -> stop()
+#     |
+# [ END ]
+
 
 import asyncio
 import logging

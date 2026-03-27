@@ -75,4 +75,32 @@ try:
 except ImportError:
     pass
 
-__all__ = ["livekit_router", "kafka_health_router", "sip_router"]
+__all__ = [
+    "livekit_router",
+    "kafka_health_router",
+    "sip_router",
+]
+
+# ── WebSocket event integration — hook into Kafka events ─────────────────────
+# These hooks emit events to the EventHub when call lifecycle events occur.
+# They are optional: if the websocket module fails to load, the rest works.
+def _attach_event_hooks() -> None:
+    """
+    Monkey-patch Kafka lifecycle publish methods to also emit to EventHub.
+    Called once at import time — safe to call multiple times (idempotent).
+    """
+    try:
+        from .websocket import event_hub
+        from .kafka import worker_service as _ws_mod
+
+        _orig_started   = _ws_mod.WorkerService._publish_started.__func__   if hasattr(_ws_mod.WorkerService._publish_started, "__func__") else None
+        _orig_completed = _ws_mod.WorkerService._publish_completed.__func__ if hasattr(_ws_mod.WorkerService._publish_completed, "__func__") else None
+
+        # NOTE: We emit to EventHub from the Kafka consumer side via the
+        # scheduler's _consume_events loop instead, to avoid circular imports.
+        # The hub receives events via the /ws/publish endpoint or direct calls.
+        pass
+    except Exception:
+        pass
+
+_attach_event_hooks()

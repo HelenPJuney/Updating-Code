@@ -1,32 +1,32 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| <BaseModel> ->           |
-| Field()                  |
-| * default_factory init   |
-+--------------------------+
-    |
-    |----> uuid.uuid4()   * unique ID generation
-    |----> time.time()    * execution timestamping
-    v
-+--------------------------+
-| <BaseModel> ->           |
-| model_dump_json()        |
-| * outbound serialization |
-+--------------------------+
-    |
-    v
-+--------------------------+
-| <BaseModel> ->           |
-| model_validate_json()    |
-| * inbound validation     |
-+--------------------------+
-    |
-    v
-[ YIELD ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | <BaseModel> ->           |
+# | Field()                  |
+# | * default_factory init   |
+# +--------------------------+
+#     |
+#     |----> uuid.uuid4()   * unique ID generation
+#     |----> time.time()    * execution timestamping
+#     v
+# +--------------------------+
+# | <BaseModel> ->           |
+# | model_dump_json()        |
+# | * outbound serialization |
+# +--------------------------+
+#     |
+#     v
+# +--------------------------+
+# | <BaseModel> ->           |
+# | model_validate_json()    |
+# | * inbound validation     |
+# +--------------------------+
+#     |
+#     v
+# [ YIELD ]
+
 
 import time
 import uuid
@@ -53,11 +53,27 @@ class CallRequest(BaseModel):
     model_path:     str   = ""
     agent_name:     str   = ""
     timestamp:      float = Field(default_factory=time.time)
-    priority:       int   = 0        # reserved for future VIP lanes
+    priority:       int   = 0        # 0=standard, 5=priority, 10=VIP
     retry_count:    int   = 0        # incremented on re-schedule after failure
     assigned_node:  Optional[str] = None   # set by Scheduler before forwarding
     source:         str   = "browser"      # "browser" or "sip" — call origin
     caller_number:  str   = ""             # SIP caller phone number / URI
+
+    # ── Routing fields (set by RoutingEngine before Kafka submission) ──────────
+    required_skills:  list[str]       = Field(default_factory=list)
+    # e.g. ["billing", "spanish"] — matched against NodeState.skills
+    routing_rule:     str             = ""
+    # name of the matched routing rule for observability
+    queue_name:       str             = "default"
+    # logical queue name: "default" | "vip" | "callback" | "overflow"
+    fallback_action:  str             = "queue"
+    # action when no node available: "queue" | "voicemail" | "callback" | "ai_bot"
+    ai_assist_mode:   bool            = False
+    # True → AI joins as silent observer, human agent is primary
+    escalation_target: Optional[str] = None
+    # human agent identity to transfer to (LiveKit participant identity)
+    scheduled_job_id: Optional[str]  = None
+    # set when call was triggered by ScheduledCallService
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -141,3 +157,51 @@ class QueueUpdate(BaseModel):
 class CallStart(BaseModel):
     """Sent to browser immediately before the AI worker joins the room."""
     type: str = "call_start"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent State (Human Agent → System)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AgentState(BaseModel):
+    """
+    Published when a human agent comes online/offline or changes availability.
+    Consumed by the RoutingEngine to update the agent registry.
+    """
+    agent_id:     str
+    name:         str   = ""
+    skills:       list[str] = Field(default_factory=list)
+    # e.g. ["billing", "english", "tier1"]
+    available:    bool  = True
+    max_calls:    int   = 1
+    active_calls: int   = 0
+    node_id:      str   = ""   # LiveKit room / participant identity
+    timestamp:    float = Field(default_factory=time.time)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Escalation (AI Worker → Human Agent)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EscalationRequest(BaseModel):
+    """
+    Sent via DataChannel when AI decides to transfer call to human.
+    Also published to Kafka for routing engine to pick up.
+    """
+    type:             str   = "escalation_request"
+    session_id:       str   = ""
+    room_id:          str   = ""
+    reason:           str   = ""   # "user_request" | "complexity" | "sentiment"
+    required_skills:  list[str] = Field(default_factory=list)
+    transcript_summary: str = ""
+    timestamp:        float = Field(default_factory=time.time)
+
+
+class EscalationResponse(BaseModel):
+    """Sent back to browser/AI when escalation is accepted or rejected."""
+    type:         str  = "escalation_response"
+    accepted:     bool = False
+    agent_id:     str  = ""
+    agent_name:   str  = ""
+    eta_sec:      int  = 0
+    reason:       str  = ""

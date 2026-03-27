@@ -1,20 +1,4 @@
-"""
-backend/livekit/sip/__init__.py
-──────────────────────────────────────────────────────────────────────────────
-SIP/PSTN integration layer for the LiveKit AI call center.
 
-Provides:
-    sip_router          — FastAPI router with /sip/webhook endpoint
-    SipSessionManager   — SIP call_id ↔ session_id ↔ room_id mapping
-    SipEventHandler     — Processes LiveKit room events for SIP calls
-
-Call flow (SIP path):
-    PSTN → SIP Provider → Asterisk → LiveKit SIP → LiveKit Room
-    LiveKit webhook → sip_ingress → Kafka call_requests → Scheduler → Worker
-
-Feature flag:
-    Set ENABLE_SIP=true to activate (default: false).
-"""
 
 from .sip_config import ENABLE_SIP
 

@@ -1,59 +1,91 @@
-"""
-test-frontend/server.py
-────────────────────────────────────────────────────────────────────────────────
-Standalone FastAPI test server for the LiveKit + Kafka pipeline.
-
-Does NOT require backend.core — runs purely from the venv packages.
-
-Endpoints:
-    GET  /                         → serve the dashboard HTML
-    GET  /api/health               → LiveKit + Kafka connectivity check
-    GET  /api/token                → generate a real LiveKit JWT
-    GET  /api/gpu                  → current GPU stats
-    GET  /api/kafka                → Kafka topic + broker status
-    POST /api/pipeline-test        → produce → consume round-trip test
-    GET  /api/queue-status         → Kafka consumer-lag for call_requests
-    GET  /api/nodes                → registered GPU nodes (from scheduler state)
-
-Run:
-    cd test-frontend
-    ../venv/Scripts/python server.py
-    open http://localhost:8888
-"""
-
-# ==========================================================
-# APPLICATION FLOW OVERVIEW
-# ==========================================================
-# 1.  dashboard()              -> Serve index.html dashboard
-# 2.  api_health()             -> LiveKit + Kafka + GPU combined health check
-# 3.  _check_livekit()         -> HTTP ping to LiveKit server
-# 4.  _check_kafka()           -> AIOKafka producer connect test
-# 5.  _check_gpu_quick()       -> pynvml direct query, auto-select STT model
-# 6.  _make_livekit_token()    -> Build LiveKit JWT via PyJWT (no package import)
-# 7.  api_token()              -> Generate browser JWT for LiveKit room
-# 8.  api_gpu()                -> Detailed GPU stats endpoint
-# 9.  api_kafka()              -> Kafka topic metadata + broker status
-# 10. api_create_topics()      -> Create all missing required Kafka topics
-# 11. api_pipeline_test()      -> Produce + consume round-trip latency test
-# 12. api_queue_status()       -> Read call_requests consumer lag
-# 13. api_config()             -> Show current configuration (no secrets)
-#
-# PIPELINE FLOW
-# Browser loads http://localhost:8888
-#    ||
-# dashboard() serves index.html
-#    ||
-# JS polls api_health() every 30s -> _check_livekit + _check_kafka + _check_gpu_quick
-#    ||
-# Generate Token -> api_token() -> _make_livekit_token() -> JWT returned
-#    ||
-# Create Missing Topics -> api_create_topics() -> AIOKafkaAdminClient
-#    ||
-# Run Round-Trip Test -> api_pipeline_test()
-#    produce to call_requests -> seek to offset -> consume back -> latency_ms
-#    ||
-# Queue Status -> api_queue_status() -> consumer lag (throttled 10s)
-# ==========================================================
+# [ START ]
+#     |
+#     v
+# +-----------------------------+
+# | /api/health                 |
+# | * Overall System Status     |
+# +-----------------------------+
+#     |
+#     | [ Parallel Checks ]
+#     |----> _check_livekit(): Tests HTTP connectivity to LiveKit
+#     |----> _check_kafka(): Tests TCP connectivity to Brokers
+#     |----> _check_gpu_quick(): Queries VRAM via NVML
+#     |
+#     |----> RETURN: Combined status JSON
+#     v
+# +-----------------------------+
+# | _check_gpu_quick()          |
+# | * VRAM & Model Logic        |
+# +-----------------------------+
+#     |
+#     | [ 1. Hardware Query ]
+#     |----> pynvml: Get memory.total, memory.used, util.gpu
+#     |
+#     | [ 2. Model Selection ]
+#     |----> Loop stt_mb_map (Whisper Large -> Tiny)
+#     |----> SELECT best model that fits in: (Free VRAM - Overhead)
+#     |
+#     | [ 3. Capacity Calc ]
+#     |----> per_call_mb = STT_VRAM + 150MB (Piper TTS)
+#     |----> max_calls = Usable_VRAM // per_call_mb
+#     |----> IF GPU util > 90%: Throttle max_calls by 30%
+#     v
+# +-----------------------------+
+# | /api/token                  |
+# | * Browser Auth Generation   |
+# +-----------------------------+
+#     |
+#     | [ Security Logic ]
+#     |----> Generate UUIDs for room and session
+#     |----> _make_livekit_token():
+#     |        - Use PyJWT to sign payload (no SDK dependency)
+#     |        - Set RoomJoin & Publish permissions
+#     |
+#     |----> RETURN: JWT + Room metadata
+#     v
+# +-----------------------------+
+# | /api/kafka/create-topics    |
+# | * Infrastructure Setup      |
+# +-----------------------------+
+#     |
+#     | [ 1. Inspection ]
+#     |----> AIOKafkaAdminClient: Fetch existing topics
+#     |
+#     | [ 2. Comparison ]
+#     |----> Filter _REQUIRED_TOPICS against existing
+#     |
+#     | [ 3. Execution ]
+#     |----> create_topics() for all missing (partitions/replicas)
+#     v
+# +-----------------------------+
+# | /api/pipeline-test          |
+# | * Full Round-Trip Test      |
+# +-----------------------------+
+#     |
+#     | [ 1. Produce Phase ]
+#     |----> Publish dummy JSON to "call_requests"
+#     |----> Record partition and offset
+#     |
+#     | [ 2. Consume Phase ]
+#     |----> Create unique temp consumer group
+#     |----> con.seek(): Jump directly to produced offset
+#     |----> con.getone(): Attempt to read back message
+#     |
+#     | [ 3. Metrics ]
+#     |----> Validate "_test": True
+#     |----> Calculate latency_ms (end - start)
+#     v
+# +-----------------------------+
+# | /api/queue-status           |
+# | * Lag Monitoring            |
+# +-----------------------------+
+#     |
+#     | [ Depth Calculation ]
+#     |----> Fetch end_offsets for "call_requests"
+#     |----> Fetch last committed offset for "scheduler-group"
+#     |----> depth = Sum(end_offset - committed_offset)
+#     v
+# [ YIELD ]
 
 import asyncio
 import json

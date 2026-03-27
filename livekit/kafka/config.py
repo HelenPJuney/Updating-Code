@@ -1,42 +1,42 @@
-[ START ]
-    |
-    v
-+--------------------------+
-| TOPIC_CALL_REQUESTS      |
-| * inbound call entry     |
-+--------------------------+
-    |
-    |----> CG_SCHEDULER * Consumer Group
-    |
-    v
-+--------------------------+
-| TOPIC_CALL_ASSIGNMENTS   |
-| * task distribution      |
-+--------------------------+
-    |
-    |----> NODE_ID * identifies worker
-    |
-    v
-+--------------------------+
-| TOPIC_WORKER_HEARTBEAT   |
-| * health check status    |
-+--------------------------+
-    |
-    |----> TOPIC_GPU_CAPACITY * monitor VRAM
-    |
-    v
-+--------------------------+
-| TOPIC_CALL_STARTED       |
-| * active call signal     |
-+--------------------------+
-    |
-    |----> TOPIC_CALL_COMPLETED * success
-    |
-    |----> TOPIC_CALL_FAILED    * error
-    |
-    |----> TOPIC_CALL_DLQ       * exhausted retries
-    |
-[ END ]
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | TOPIC_CALL_REQUESTS      |
+# | * inbound call entry     |
+# +--------------------------+
+#     |
+#     |----> CG_SCHEDULER * Consumer Group
+#     |
+#     v
+# +--------------------------+
+# | TOPIC_CALL_ASSIGNMENTS   |
+# | * task distribution      |
+# +--------------------------+
+#     |
+#     |----> NODE_ID * identifies worker
+#     |
+#     v
+# +--------------------------+
+# | TOPIC_WORKER_HEARTBEAT   |
+# | * health check status    |
+# +--------------------------+
+#     |
+#     |----> TOPIC_GPU_CAPACITY * monitor VRAM
+#     |
+#     v
+# +--------------------------+
+# | TOPIC_CALL_STARTED       |
+# | * active call signal     |
+# +--------------------------+
+#     |
+#     |----> TOPIC_CALL_COMPLETED * success
+#     |
+#     |----> TOPIC_CALL_FAILED    * error
+#     |
+#     |----> TOPIC_CALL_DLQ       * exhausted retries
+#     |
+# [ END ]
 
 
 import os
@@ -119,6 +119,5 @@ WORKER_SHUTDOWN_DRAIN_SEC:  float = 60.0  # wait this long for active tasks to f
 AVG_CALL_DURATION_SEC: int = 120    # used purely for queue ETA estimate
 
 # ── Wait queue capacity (Kafka-lag-based overflow guard) ─────────────────────
-# If Kafka consumer lag on call_requests exceeds this value the scheduler
-# pauses its consumer — new messages accumulate in Kafka naturally (backpressure).
+
 MAX_QUEUE_SIZE: int = int(os.getenv("MAX_QUEUE_SIZE", "10000"))

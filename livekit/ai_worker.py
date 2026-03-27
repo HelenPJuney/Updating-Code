@@ -1,119 +1,83 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| get_livekit_token()      |
-| * FastAPI JWT endpoint   |
-+--------------------------+
-    |
-    |----> <_RateLimiter> -> check()
-    |           |
-    |           ----> asyncio.get_running_loop()
-    |
-    |----> generate_token()
-    |
-    |----> [ KAFKA PATH ]
-    |           |
-    |           ----> <CallRequestProducer> -> submit_call_request()
-    |
-    |----> [ FALLBACK PATH ]
-                |
-                ----> asyncio.ensure_future() -> ai_worker_task()
-    |
-    v
-+--------------------------+
-| ai_worker_task()         |
-| * AI agent lifecycle     |
-+--------------------------+
-    |
-    |----> <rtc.Room> -> connect()
-    |
-    |----> <TtsAudioSource> -> start()
-    |
-    |----> <rtc.LocalAudioTrack> -> create_audio_track()
-    |
-    |----> <livekit_session_manager> -> add()
-    |
-    |----> _register_ivr_call()
-    |           |
-    |           ----> _ivr_post() * "/calls/start"
-    |
-    |----> _send_greeting()
-    |           |
-    |           ----> _piper_sync()
-    |           |
-    |           ----> <TtsAudioSource> -> push_tts_wav()
-    |           |
-    |           ----> _publish_data() * {"type": "greeting"}
-    |
-    |----> _inbound_audio_loop()
-    |           |
-    |           ----> <rtc.AudioStream>
-    |           |
-    |           ----> <AudioBuf> -> push()
-    |           |
-    |           ----> _process_turn()
-    |                       |
-    |                       |----> stt_sync()
-    |                       |
-    |                       |----> _gemini_sync() / _qwen_sync()
-    |                       |
-    |                       |----> _piper_sync()
-    |                       |
-    |                       |----> _publish_data() * {"type": "response"}
-    |
-    v
-+--------------------------+
-| _finalize_ivr_call()     |
-| * teardown and recording |
-+--------------------------+
-    |
-    |----> _build_recording()
-    |
-    |----> _ivr_patch() * "/calls/recording"
-    |
-    |----> _ivr_post()  * "/calls/end"
-    |
-[ END ]
-"""
 
-# ==========================================================
-# APPLICATION FLOW OVERVIEW
-# ==========================================================
-# 1.  get_livekit_token()      -> Issue browser JWT + submit to Kafka
-# 2.  _RateLimiter             -> Token-bucket per-process rate limiter
-# 3.  livekit_health()         -> Return session count + Kafka status
-# 4.  get_queue_status()       -> Read cached Kafka lag (zero I/O)
-# 5.  ai_worker_task()         -> Full lifecycle of one AI call session
-# 6.  _send_greeting()         -> TTS-synthesize and publish opening line
-# 7.  _inbound_audio_loop()    -> Receive mic frames, feed VAD buffer
-# 8.  _process_turn()          -> STT → LLM → TTS for one utterance
-# 9.  _publish_data()          -> Send JSON control msg via DataChannel
-# 10. _build_recording()       -> Assemble full-duplex WAV at hangup
-# 11. _finalize_ivr_call()     -> Save recording + close IVR record
-# 12. _register_ivr_call()     -> Register call in ivr_backend
-# 13. _save_transcript()       -> Persist one transcript line to IVR
-#
-# PIPELINE FLOW
-# Browser GET /livekit/token
-#    ||
-# get_livekit_token() -> rate-limit check -> Kafka produce (or fallback spawn)
-#    ||
-# ai_worker_task() -> room.connect -> publish TTS audio track
-#    ||
-# participant_connected -> _send_greeting() -> _piper_sync -> push_tts_wav()
-#    ||
-# _inbound_audio_loop() -> AudioBuf VAD -> _process_turn()
-#    ||
-# stt_sync -> _collapse_repetitions -> _is_hallucination
-#    ||
-# _gemini_sync / _qwen_sync -> _humanize_text -> _piper_sync
-#    ||
-# push_tts_wav() -> _publish_data(response) -> _save_transcript()
-#    ||
-# hangup -> _finalize_ivr_call() -> _build_recording() -> room.disconnect()
-# ==========================================================
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | get_livekit_token()      |
+# | * FastAPI JWT endpoint   |
+# +--------------------------+
+#     |
+#     |----> <_RateLimiter> -> check()
+#     |           |
+#     |           ----> asyncio.get_running_loop()
+#     |
+#     |----> generate_token()
+#     |
+#     |----> [ KAFKA PATH ]
+#     |           |
+#     |           ----> <CallRequestProducer> -> submit_call_request()
+#     |
+#     |----> [ FALLBACK PATH ]
+#                 |
+#                 ----> asyncio.ensure_future() -> ai_worker_task()
+#     |
+#     v
+# +--------------------------+
+# | ai_worker_task()         |
+# | * AI agent lifecycle     |
+# +--------------------------+
+#     |
+#     |----> <rtc.Room> -> connect()
+#     |
+#     |----> <TtsAudioSource> -> start()
+#     |
+#     |----> <rtc.LocalAudioTrack> -> create_audio_track()
+#     |
+#     |----> <livekit_session_manager> -> add()
+#     |
+#     |----> _register_ivr_call()
+#     |           |
+#     |           ----> _ivr_post() * "/calls/start"
+#     |
+#     |----> _send_greeting()
+#     |           |
+#     |           ----> _piper_sync()
+#     |           |
+#     |           ----> <TtsAudioSource> -> push_tts_wav()
+#     |           |
+#     |           ----> _publish_data() * {"type": "greeting"}
+#     |
+#     |----> _inbound_audio_loop()
+#     |           |
+#     |           ----> <rtc.AudioStream>
+#     |           |
+#     |           ----> <AudioBuf> -> push()
+#     |           |
+#     |           ----> _process_turn()
+#     |                       |
+#     |                       |----> stt_sync()
+#     |                       |
+#     |                       |----> _gemini_sync() / _qwen_sync()
+#     |                       |
+#     |                       |----> _piper_sync()
+#     |                       |
+#     |                       |----> _publish_data() * {"type": "response"}
+#     |
+#     v
+# +--------------------------+
+# | _finalize_ivr_call()     |
+# | * teardown and recording |
+# +--------------------------+
+#     |
+#     |----> _build_recording()
+#     |
+#     |----> _ivr_patch() * "/calls/recording"
+#     |
+#     |----> _ivr_post()  * "/calls/end"
+#     |
+# [ END ]
+
+
 
 import asyncio
 import io
@@ -154,14 +118,8 @@ _WORKER_IDENTITY_PREFIX = "ai-worker-"
 livekit_router = APIRouter(prefix="/livekit", tags=["livekit"])
 
 
-# ── In-memory rate limiter (Fix 7) ───────────────────────────────────────────
-# Token-bucket algorithm — no external dependencies.
-# Allows up to _RATE_MAX_CALLS requests per _RATE_WINDOW_SEC window.
-# Implemented as a simple in-process counter; suitable for single-process
-# deployments. For multi-process deployments use Redis atomic increment.
 
 class _RateLimiter:
-    """Thread/coroutine safe token-bucket rate limiter."""
 
     def __init__(self, max_calls: int, window_sec: float) -> None:
         self._max_calls  = max_calls
@@ -170,10 +128,7 @@ class _RateLimiter:
         self._lock = asyncio.Lock()
 
     async def check(self) -> bool:
-        """
-        Return True if the request is allowed, False if rate-limited.
-        Slides the window and prunes old timestamps every call.
-        """
+     
         now = asyncio.get_running_loop().time()
         async with self._lock:
             # Remove timestamps outside the current window
@@ -187,56 +142,13 @@ class _RateLimiter:
 
 _token_rate_limiter = _RateLimiter(max_calls=100, window_sec=1.0)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PART A — FastAPI endpoints
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# --------------------------------------------------
-# get_livekit_token -> Issue JWT + submit call to Kafka scheduler
-#    ||
-# Resolve voice registry -> generate user JWT
-#    ||
-# KAFKA PATH:   produce call_request → Kafka → Scheduler → WorkerService
-# FALLBACK PATH: asyncio.ensure_future(ai_worker_task) [Kafka unavailable]
-#    ||
-# Return {token, url, room, agent_name, session_id, queue_position}
-# --------------------------------------------------
 @livekit_router.get("/token")
 async def get_livekit_token(
     lang:  str = "en",
     llm:   str = "gemini",
     voice: str = "",
 ):
-    """
-    Issue a LiveKit JWT for the browser and submit the call to the Kafka
-    scheduler for GPU-aware dispatch.
-
-    Query params:
-        lang  — ISO language code (en, hi, te, …)
-        llm   — "gemini" or "qwen"
-        voice — Piper voice stem (e.g. "en_US-lessac-medium")
-
-    Returns:
-        {
-          "token":           "<signed JWT for browser>",
-          "url":             "ws://localhost:7880",
-          "room":            "<room UUID>",
-          "agent_name":      "Angela",
-          "session_id":      "<uuid>",
-          "queue_position":  null | int   # null = starting immediately
-        }
-
-    Kafka path (production):
-        The browser JWT is returned immediately so the browser can join the
-        LiveKit room.  The AI worker is started asynchronously by the GPU
-        Worker Service once the Scheduler gives the green light.  While
-        waiting, the browser receives queue_update DataChannel messages.
-
-    Fallback path (Kafka unavailable):
-        Falls back to the original behaviour — ai_worker_task is spawned
-        directly.  queue_position is always null in this case.
-    """
+ 
     room_id    = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
 
@@ -340,22 +252,7 @@ async def livekit_health():
 
 @livekit_router.get("/queue-status/{session_id}")
 async def get_queue_status(session_id: str):
-    """
-    Poll the approximate queue depth for a waiting session.
 
-    FIX 4: No Kafka consumer is created per request.  The Scheduler
-    periodically refreshes a cached lag value (_cached_lag) which is
-    exposed via get_cached_lag().  This endpoint reads that integer
-    directly — O(1), no I/O.
-
-    Returns:
-        {
-          "session_id":      "<uuid>",
-          "status":          "waiting" | "active" | "unknown",
-          "queue_position":  int | null,
-          "eta_sec":         int | null
-        }
-    """
     # 1. Check if the session is actively running locally
     if livekit_session_manager.get(session_id):
         return {
@@ -434,14 +331,7 @@ async def _save_transcript(call_id: int, speaker: str, text: str) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_recording(turns: List[dict]) -> Optional[bytes]:
-    """
-    Build full-duplex WAV from ordered recording turns.
-    Identical to old signaling_server._build_recording() — do not modify.
 
-    Each turn is:
-      {"type": "ai",   "wav": bytes}        — Piper TTS WAV
-      {"type": "user", "pcm": np.ndarray}   — float32 16 kHz PCM
-    """
     from backend.webrtc.utils import wav_bytes_to_pcm, resample_audio
 
     TARGET_SR   = 16_000
@@ -515,16 +405,8 @@ async def _finalize_ivr_call(session: LiveKitSession) -> None:
 # PART D — Data channel helper
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --------------------------------------------------
-# _publish_data -> Send JSON control message to browser via LiveKit DataChannel
-#    ||
-# room.local_participant.publish_data(payload, reliable=True)
-# --------------------------------------------------
 async def _publish_data(session: LiveKitSession, msg: dict) -> None:
-    """
-    Publish a JSON control message to all participants in the room.
-    Replaces the old ws.send_json() calls — same message format, different transport.
-    """
+
     if session.room is None or session.closed:
         return
     try:
@@ -540,13 +422,6 @@ async def _publish_data(session: LiveKitSession, msg: dict) -> None:
 # PART E — AI Greeting
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --------------------------------------------------
-# _send_greeting -> TTS-synthesize the opening greeting and publish to room
-#    ||
-# load_greetings / generate_greeting -> _piper_sync -> push_tts_wav
-#    ||
-# _publish_data {"type":"greeting"} + save to ivr transcript
-# --------------------------------------------------
 async def _send_greeting(session: LiveKitSession) -> None:
     loop = asyncio.get_running_loop()
     try:
@@ -587,25 +462,8 @@ async def _send_greeting(session: LiveKitSession) -> None:
 # PART F — Inbound audio loop
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --------------------------------------------------
-# _inbound_audio_loop -> Receive LiveKit audio frames, feed VAD buffer
-#    ||
-# rtc.AudioStream(track, sample_rate=16000) -> int16 @ 16kHz
-#    ||
-# frombuffer -> float32 -> AudioBuf.push
-#    ||
-# buf.ready -> audio_source.clear (barge-in) -> _process_turn
-# --------------------------------------------------
 async def _inbound_audio_loop(session: LiveKitSession, track) -> None:
-    """
-    Consume audio frames from the user's LiveKit audio track and feed them
-    into the AudioBuf VAD.
-
-    Key difference from the old aiortc loop:
-      OLD: frame.to_ndarray() + manual 48→16kHz resample
-      NEW: rtc.AudioStream(..., sample_rate=16000) — LiveKit resamples for us.
-           Frames arrive already at 16 kHz mono, so no scipy resample needed.
-    """
+  
     from livekit import rtc
 
     logger.info(
@@ -613,13 +471,6 @@ async def _inbound_audio_loop(session: LiveKitSession, track) -> None:
         session.session_id[:8],
     )
 
-    # Request 16kHz mono from LiveKit — matches STT and VAD input exactly.
-    # No manual resampling step needed (unlike the old aiortc path).
-    #
-    # Compatibility note:
-    #   livekit-rtc iterates directly: `async for event in AudioStream(...)`
-    #   event may be AudioFrameEvent (has .frame) or AudioFrame directly.
-    #   We handle both with getattr fallback.
     try:
         stream = rtc.AudioStream(track, sample_rate=16_000, num_channels=1)
     except TypeError:
@@ -669,30 +520,12 @@ async def _inbound_audio_loop(session: LiveKitSession, track) -> None:
 # PART G — Per-turn AI pipeline  (identical to old signaling_server._process_turn)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --------------------------------------------------
-# _process_turn -> Full AI pipeline for one speech turn
-#    ||
-# stt_sync -> _collapse_repetitions -> _is_hallucination
-#    ||
-# _gemini_sync / _qwen_sync -> _humanize_text -> _piper_sync
-#    ||
-# push_tts_wav -> _publish_data response -> _save_transcript -> FAISS persist
-# --------------------------------------------------
 async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
-    """
-    Run the full AI pipeline for one utterance:
-      STT → LLM → TTS → publish audio + data messages
 
-    All logic is identical to old signaling_server._process_turn().
-    The only difference: instead of ws.send_json(), we call _publish_data().
-    Instead of outbound_track.push_tts_wav(), we call audio_source.push_tts_wav().
-    """
     loop = asyncio.get_running_loop()
 
     async with session.lock:
 
-        # Clear stale interrupt from before this turn started.
-        # (Same logic as old code — prevents pivot on the user's own question.)
         session.interrupted = False
 
         # ── Stage 1: STT ──────────────────────────────────────────────────────
@@ -807,15 +640,6 @@ async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
 # PART H — Main worker task
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --------------------------------------------------
-# ai_worker_task -> Full lifecycle of one AI call session
-#    ||
-# room.connect -> subscribe mic track -> publish TTS track
-#    ||
-# send greeting on user join -> run until session.closed
-#    ||
-# _finalize_ivr_call -> room.disconnect -> cleanup session
-# --------------------------------------------------
 async def ai_worker_task(
     room_id:    str,
     session_id: str,
@@ -825,20 +649,7 @@ async def ai_worker_task(
     model_path: str,
     agent_name: str,
 ) -> None:
-    """
-    Background asyncio task — the AI call center agent for one room.
-
-    Lifecycle:
-      1. Create LiveKitSession
-      2. Connect to LiveKit room as "ai-worker-{session_id[:8]}"
-      3. Create TtsAudioSource + LocalAudioTrack, publish to room
-      4. Register room event handlers (track_subscribed, data_received, …)
-      5. Register ivr_backend call record
-      6. If user is already in room → send greeting immediately
-      7. Sleep in a loop until session.closed (set by hangup / disconnect)
-      8. Finalize ivr_backend record + save recording
-      9. Disconnect from room, cleanup session
-    """
+ 
     from livekit import rtc
 
     session = LiveKitSession(
@@ -866,8 +677,7 @@ async def ai_worker_task(
 
     @room.on("participant_connected")
     def _on_participant_connected(participant) -> None:
-        # Fire greeting when the first human caller joins.
-        # Guard: the worker itself might trigger this on connect in some versions.
+
         ident: str = getattr(participant, "identity", "") or ""
         if _WORKER_IDENTITY_PREFIX in ident:
             return   # ignore our own join event
@@ -898,9 +708,7 @@ async def ai_worker_task(
 
     @room.on("track_subscribed")
     def _on_track_subscribed(track, publication, participant) -> None:
-        # Subscribe to the user's microphone track.
-        # Use isinstance as the primary check — track.kind is an int (1=audio)
-        # in livekit-rtc, so str(track.kind) is "1" not "AUDIO".
+       
         ident: str = getattr(participant, "identity", "") or ""
         if _WORKER_IDENTITY_PREFIX in ident:
             return   # don't subscribe to our own track

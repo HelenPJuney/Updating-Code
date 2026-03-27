@@ -1,54 +1,54 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| <QueueNotifier> ->       |
-| start()                  |
-| * init LiveKitAPI client |
-+--------------------------+
-    |
-    |----> <LiveKitAPI> -> __init__()
-    v
-+--------------------------+
-| <QueueNotifier> ->       |
-| broadcast_queue_         |
-| positions()              |
-+--------------------------+
-    |
-    |----> enumerate(queue_items)
-    |           |
-    |           ----> <QueueUpdate> -> model_dump_json()
-    |----> asyncio.gather()
-    |           |
-    |           ----> <QueueNotifier> -> _send_to_room()
-    v
-+--------------------------+
-| <QueueNotifier> ->       |
-| notify_call_starting()   |
-+--------------------------+
-    |
-    |----> <CallStart> -> model_dump_json()
-    |----> <QueueNotifier> -> _send_to_room()
-    v
-+--------------------------+
-| <QueueNotifier> ->       |
-| _send_to_room()          |
-+--------------------------+
-    |
-    |----> <SendDataRequest> -> __init__()
-    |----> <LiveKitAPI> -> room.send_data()
-    v
-+--------------------------+
-| <QueueNotifier> ->       |
-| stop()                   |
-| * close API client       |
-+--------------------------+
-    |
-    |----> <LiveKitAPI> -> aclose()
-    |
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | <QueueNotifier> ->       |
+# | start()                  |
+# | * init LiveKitAPI client |
+# +--------------------------+
+#     |
+#     |----> <LiveKitAPI> -> __init__()
+#     v
+# +--------------------------+
+# | <QueueNotifier> ->       |
+# | broadcast_queue_         |
+# | positions()              |
+# +--------------------------+
+#     |
+#     |----> enumerate(queue_items)
+#     |           |
+#     |           ----> <QueueUpdate> -> model_dump_json()
+#     |----> asyncio.gather()
+#     |           |
+#     |           ----> <QueueNotifier> -> _send_to_room()
+#     v
+# +--------------------------+
+# | <QueueNotifier> ->       |
+# | notify_call_starting()   |
+# +--------------------------+
+#     |
+#     |----> <CallStart> -> model_dump_json()
+#     |----> <QueueNotifier> -> _send_to_room()
+#     v
+# +--------------------------+
+# | <QueueNotifier> ->       |
+# | _send_to_room()          |
+# +--------------------------+
+#     |
+#     |----> <SendDataRequest> -> __init__()
+#     |----> <LiveKitAPI> -> room.send_data()
+#     v
+# +--------------------------+
+# | <QueueNotifier> ->       |
+# | stop()                   |
+# | * close API client       |
+# +--------------------------+
+#     |
+#     |----> <LiveKitAPI> -> aclose()
+#     |
+# [ END ]
+
 
 import asyncio
 import json

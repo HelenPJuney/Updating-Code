@@ -1,37 +1,37 @@
-"""
-[ START ]
-    |
-    v
-+--------------------------+
-| AccessToken()            |
-| * init with credentials  |
-+--------------------------+
-    |
-    |----> .identity = "test-user"
-    |
-    |----> .name = "Test User"
-    |
-    |----> .ttl = timedelta(hours=10)
-    |
-    v
-+--------------------------+
-| VideoGrants()            |
-| * define permissions     |
-+--------------------------+
-    |
-    |----> room_join=True
-    |
-    |----> room="test-room"
-    |
-    v
-+--------------------------+
-| token.to_jwt()           |
-| * sign and encode        |
-+--------------------------+
-    |
-    v
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +--------------------------+
+# | AccessToken()            |
+# | * init with credentials  |
+# +--------------------------+
+#     |
+#     |----> .identity = "test-user"
+#     |
+#     |----> .name = "Test User"
+#     |
+#     |----> .ttl = timedelta(hours=10)
+#     |
+#     v
+# +--------------------------+
+# | VideoGrants()            |
+# | * define permissions     |
+# +--------------------------+
+#     |
+#     |----> room_join=True
+#     |
+#     |----> room="test-room"
+#     |
+#     v
+# +--------------------------+
+# | token.to_jwt()           |
+# | * sign and encode        |
+# +--------------------------+
+#     |
+#     v
+# [ END ]
+
 from livekit.api import AccessToken, VideoGrants
 import datetime
 

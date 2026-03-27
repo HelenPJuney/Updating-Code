@@ -1,90 +1,57 @@
-"""
-[ START ]
-    |
-    v
-+-----------------------------+
-| _main()                     |
-| * process entry point       |
-+-----------------------------+
-    |
-    |----> <WorkerService> -> run()
-    |           |
-    |           ----> <WorkerService> -> start()
-    |           |           |
-    |           |           ----> <AIOKafkaProducer> -> start()
-    |           |           |
-    |           |           ----> <AIOKafkaConsumer> -> start()
-    |           |           |
-    |           |           ----> <AIOKafkaConsumer> -> assign()
-    |           |
-    |           ----> <GpuMonitor> -> start()
-    |           |
-    |           ----> asyncio.TaskGroup()
-    |                       |
-    |                       |----> _consume_calls()
-    |                       |           |
-    |                       |           ----> _run_worker_with_lifecycle()
-    |                       |                       |
-    |                       |                       ----> _publish_started()
-    |                       |                       |
-    |                       |                       ----> ai_worker_task() * AI Pipeline
-    |                       |                       |
-    |                       |                       ----> _publish_completed()
-    |                       |                       |
-    |                       |                       ----> _publish_failed()
-    |                       |                       |
-    |                       |                       ----> _publish_dlq()
-    |                       |
-    |                       |----> _heartbeat_loop()
-    |                                   |
-    |                                   ----> _publish() * WorkerHeartbeat
-    v
-+-----------------------------+
-| <WorkerService> -> stop()    |
-| * drain and shutdown        |
-+-----------------------------+
-    |
-    |----> <GpuMonitor> -> stop()
-    |
-    |----> asyncio.wait_for() * drain active tasks
-    |
-    |----> <AIOKafka> -> stop()
-    |
-[ END ]
-"""
 
-# ==========================================================
-# APPLICATION FLOW OVERVIEW
-# ==========================================================
-# 1.  WorkerService            -> GPU node task pool manager
-# 2.  WorkerService.start()    -> Connect consumer + producer, start GPU monitor
-# 3.  WorkerService.run()      -> Launch consume + heartbeat + shutdown tasks
-# 4.  _consume_assignments()   -> Read call_assignments, spawn worker tasks
-# 5.  _run_worker_with_lifecycle() -> Wrap ai_worker_task with retry + events
-# 6.  _publish_call_started()  -> Emit call_started event to Kafka
-# 7.  _publish_call_completed() -> Emit call_completed event + duration
-# 8.  _publish_call_failed()   -> Emit call_failed or call_dlq after max retries
-# 9.  _heartbeat_loop()        -> Publish worker_heartbeat every 10s
-# 10. _drain_and_shutdown()    -> Wait for active tasks before exit (60s max)
-# 11. GpuMonitor               -> Polls GPU, publishes gpu_capacity to Kafka
-#
-# PIPELINE FLOW
-# Scheduler produces to call_assignments (node's partition)
-#    ||
-# _consume_assignments() receives CallRequest
-#    ||
-# _run_worker_with_lifecycle() -> _publish_call_started()
-#    ||
-# ai_worker_task() -> full VAD -> STT -> LLM -> TTS AI pipeline
-#    ||
-# success -> _publish_call_completed(duration)
-# failure -> exponential backoff retry (up to WORKER_MAX_RETRY)
-# max retries -> _publish_call_failed() -> call_dlq (dead-letter queue)
-#    ||
-# GpuMonitor._publish_once() -> gpu_capacity -> Scheduler updates node state
-#    ||
-# SIGTERM -> _drain_and_shutdown() -> wait active tasks -> consumer.stop()
-# ==========================================================
+# [ START ]
+#     |
+#     v
+# +-----------------------------+
+# | _main()                     |
+# | * process entry point       |
+# +-----------------------------+
+#     |
+#     |----> <WorkerService> -> run()
+#     |           |
+#     |           ----> <WorkerService> -> start()
+#     |           |           |
+#     |           |           ----> <AIOKafkaProducer> -> start()
+#     |           |           |
+#     |           |           ----> <AIOKafkaConsumer> -> start()
+#     |           |           |
+#     |           |           ----> <AIOKafkaConsumer> -> assign()
+#     |           |
+#     |           ----> <GpuMonitor> -> start()
+#     |           |
+#     |           ----> asyncio.TaskGroup()
+#     |                       |
+#     |                       |----> _consume_calls()
+#     |                       |           |
+#     |                       |           ----> _run_worker_with_lifecycle()
+#     |                       |                       |
+#     |                       |                       ----> _publish_started()
+#     |                       |                       |
+#     |                       |                       ----> ai_worker_task() * AI Pipeline
+#     |                       |                       |
+#     |                       |                       ----> _publish_completed()
+#     |                       |                       |
+#     |                       |                       ----> _publish_failed()
+#     |                       |                       |
+#     |                       |                       ----> _publish_dlq()
+#     |                       |
+#     |                       |----> _heartbeat_loop()
+#     |                                   |
+#     |                                   ----> _publish() * WorkerHeartbeat
+#     v
+# +-----------------------------+
+# | <WorkerService> -> stop()    |
+# | * drain and shutdown        |
+# +-----------------------------+
+#     |
+#     |----> <GpuMonitor> -> stop()
+#     |
+#     |----> asyncio.wait_for() * drain active tasks
+#     |
+#     |----> <AIOKafka> -> stop()
+#     |
+# [ END ]
+
 
 import asyncio
 import logging

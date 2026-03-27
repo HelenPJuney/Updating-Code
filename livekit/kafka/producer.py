@@ -1,51 +1,51 @@
-"""
-[ START ]
-    |
-    v
-+-----------------------------+
-| get_producer()              |
-| * singleton accessor        |
-+-----------------------------+
-    |
-    |----> <CallRequestProducer> -> __init__()
-    |
-    v
-+-----------------------------+
-| <CallRequestProducer> ->    |
-| start()                     |
-| * connect to brokers        |
-+-----------------------------+
-    |
-    |----> <AIOKafkaProducer> -> start()
-    |           |
-    |           ----> [ EXCEPTION ] -> set _fallback = True
-    v
-+-----------------------------+
-| <CallRequestProducer> ->    |
-| submit_call_request()       |
-| * produce to Kafka          |
-+-----------------------------+
-    |
-    |----> [ IF _fallback ] -> return None
-    |           |
-    |           ----> (Trigger local spawn)
-    |
-    |----> <CallRequestRequest> -> model_dump_json()
-    |
-    |----> <AIOKafkaProducer> -> send_and_wait()
-    |           |
-    |           ----> return 0 * queue placeholder
-    v
-+-----------------------------+
-| <CallRequestProducer> ->    |
-| stop()                      |
-| * graceful shutdown         |
-+-----------------------------+
-    |
-    |----> <AIOKafkaProducer> -> stop()
-    |
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +-----------------------------+
+# | get_producer()              |
+# | * singleton accessor        |
+# +-----------------------------+
+#     |
+#     |----> <CallRequestProducer> -> __init__()
+#     |
+#     v
+# +-----------------------------+
+# | <CallRequestProducer> ->    |
+# | start()                     |
+# | * connect to brokers        |
+# +-----------------------------+
+#     |
+#     |----> <AIOKafkaProducer> -> start()
+#     |           |
+#     |           ----> [ EXCEPTION ] -> set _fallback = True
+#     v
+# +-----------------------------+
+# | <CallRequestProducer> ->    |
+# | submit_call_request()       |
+# | * produce to Kafka          |
+# +-----------------------------+
+#     |
+#     |----> [ IF _fallback ] -> return None
+#     |           |
+#     |           ----> (Trigger local spawn)
+#     |
+#     |----> <CallRequestRequest> -> model_dump_json()
+#     |
+#     |----> <AIOKafkaProducer> -> send_and_wait()
+#     |           |
+#     |           ----> return 0 * queue placeholder
+#     v
+# +-----------------------------+
+# | <CallRequestProducer> ->    |
+# | stop()                      |
+# | * graceful shutdown         |
+# +-----------------------------+
+#     |
+#     |----> <AIOKafkaProducer> -> stop()
+#     |
+# [ END ]
+
 import asyncio
 import logging
 from typing import Optional

@@ -1,49 +1,49 @@
-"""
-[ START ]
-    |
-    v
-+------------------------+
-| pynvml.nvmlInit()      |
-| * one-time GPU init    |
-+------------------------+
-    |
-    |----> pynvml.nvmlDeviceGetHandleByIndex()
-    |
-    v
-+------------------------+
-| <GpuMonitor> -> start()|
-| * initialize loop      |
-+------------------------+
-    |
-    v
-+------------------------+
-| <GpuMonitor> -> _loop()|
-| * async polling task   |
-+------------------------+
-    |
-    |----> <GpuMonitor> -> _publish_once()
-    |           |
-    |           |----> compute_max_calls()
-    |           |           |
-    |           |           |----> _per_call_memory_mb()
-    |           |           |
-    |           |           |----> <pynvml> -> nvmlDeviceGetMemoryInfo()
-    |           |           |
-    |           |           |----> <pynvml> -> nvmlDeviceGetUtilizationRates()
-    |           |
-    |           |----> <GpuCapacity> -> model_dump_json()
-    |           |
-    |           |----> <AIOKafkaProducer> -> send()
-    |
-    v
-+------------------------+
-| <GpuMonitor> -> stop() |
-| * cancel task          |
-+------------------------+
-    |
-    v
-[ END ]
-"""
+
+# [ START ]
+#     |
+#     v
+# +------------------------+
+# | pynvml.nvmlInit()      |
+# | * one-time GPU init    |
+# +------------------------+
+#     |
+#     |----> pynvml.nvmlDeviceGetHandleByIndex()
+#     |
+#     v
+# +------------------------+
+# | <GpuMonitor> -> start()|
+# | * initialize loop      |
+# +------------------------+
+#     |
+#     v
+# +------------------------+
+# | <GpuMonitor> -> _loop()|
+# | * async polling task   |
+# +------------------------+
+#     |
+#     |----> <GpuMonitor> -> _publish_once()
+#     |           |
+#     |           |----> compute_max_calls()
+#     |           |           |
+#     |           |           |----> _per_call_memory_mb()
+#     |           |           |
+#     |           |           |----> <pynvml> -> nvmlDeviceGetMemoryInfo()
+#     |           |           |
+#     |           |           |----> <pynvml> -> nvmlDeviceGetUtilizationRates()
+#     |           |
+#     |           |----> <GpuCapacity> -> model_dump_json()
+#     |           |
+#     |           |----> <AIOKafkaProducer> -> send()
+#     |
+#     v
+# +------------------------+
+# | <GpuMonitor> -> stop() |
+# | * cancel task          |
+# +------------------------+
+#     |
+#     v
+# [ END ]
+
 import asyncio
 import logging
 import os
