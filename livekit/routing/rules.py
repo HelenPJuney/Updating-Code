@@ -7,25 +7,8 @@
 # | * Atomic reload logic    |
 # +--------------------------+
 #     |
-#     | [ 1. Read File ]
-#     |----> Open file via _path
-#     |----> json.load() into 'raw'
+#     | 
 #     |
-#     | [ 2. Parse & Transform ]
-#     |----> Loop 'raw["rules"]'
-#     |        |
-#     |        ----> _parse_rule(dict)
-#     |                |
-#     |                ----> Create RuleConditions
-#     |                ----> Create RuleTarget
-#     |                ----> Create RoutingRule
-#     |
-#     | [ 3. Sort ]
-#     |----> rules.sort(key=priority)
-#     |      (Lower number = higher priority)
-#     |
-#     | [ 4. Update State ]
-#     |----> Atomic swap: self._rules = rules
 #     v
 # +--------------------------+
 # | to_dict_list()           |
@@ -56,7 +39,8 @@ class RuleConditions:
     lang:                    Optional[List[str]] = None   # match if req.lang in list
     source:                  Optional[List[str]] = None   # match if req.source in list
     priority_gte:            int                 = 0      # req.priority >= this
-    caller_number_prefix:    Optional[List[str]] = None   # starts-with check
+    caller_number_prefix:    Optional[List[str]] = None   # SIP: starts-with check on caller_number
+    caller_id_prefix:        Optional[List[str]] = None   # Browser: starts-with check on caller_id
     time_of_day_utc_between: Optional[List[str]] = None   # ["HH:MM", "HH:MM"] inclusive
     time_of_day_utc_outside: Optional[List[str]] = None   # outside window
 
@@ -115,6 +99,7 @@ class RuleLoader:
             source                  = cond_raw.get("source"),
             priority_gte            = cond_raw.get("priority_gte", 0),
             caller_number_prefix    = cond_raw.get("caller_number_prefix"),
+            caller_id_prefix        = cond_raw.get("caller_id_prefix"),
             time_of_day_utc_between = cond_raw.get("time_of_day_utc_between"),
             time_of_day_utc_outside = cond_raw.get("time_of_day_utc_outside"),
         )
@@ -154,6 +139,7 @@ class RuleLoader:
                     "source":                  r.conditions.source,
                     "priority_gte":            r.conditions.priority_gte,
                     "caller_number_prefix":    r.conditions.caller_number_prefix,
+                    "caller_id_prefix":        r.conditions.caller_id_prefix,
                     "time_of_day_utc_between": r.conditions.time_of_day_utc_between,
                     "time_of_day_utc_outside": r.conditions.time_of_day_utc_outside,
                 },

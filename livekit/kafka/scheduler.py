@@ -1,64 +1,61 @@
-
-# [ START ]
+# ==========================================================
+# EXECUTION FLOW
+# ==========================================================
+#
+# +----------------------------------+
+# | start()                          |
+# | * connect consumers + producer   |
+# +----------------------------------+
 #     |
 #     v
-# +-----------------------------+
-# | _main()                     |
-# | * global entry point        |
-# +-----------------------------+
+# +----------------------------------+
+# | run()                            |
+# | * launch concurrent task loops   |
+# +----------------------------------+
 #     |
-#     |----> <CallScheduler> -> run()
-#     |           |
-#     |           ----> <CallScheduler> -> start()
-#     |           |           |
-#     |           |           ----> <AIOKafkaConsumer> -> start()
-#     |           |           |
-#     |           |           ----> <AIOKafkaProducer> -> start()
-#     |           |           |
-#     |           |           ----> <QueueNotifier> -> start()
-#     |           |
-#     |           ----> asyncio.TaskGroup()
-#     |                       |
-#     |                       |----> _consume_call_requests()
-#     |                       |           |
-#     |                       |           ----> _select_best_node()
-#     |                       |           |
-#     |                       |           ----> _assign_call()
-#     |                       |           |
-#     |                       |           ----> <AIOKafkaConsumer> -> pause()
-#     |                       |
-#     |                       |----> _consume_events()
-#     |                       |           |
-#     |                       |           ----> _on_gpu_capacity()
-#     |                       |           |
-#     |                       |           ----> _on_heartbeat()
-#     |                       |           |
-#     |                       |           ----> _on_call_finished()
-#     |                       |           |
-#     |                       |           ----> _resume_paused_partitions()
-#     |                       |
-#     |                       |----> _dead_node_watchdog()
-#     |                       |
-#     |                       |----> _periodic_queue_broadcast()
-#     |                                   |
-#     |                                   ----> _refresh_lag_cache()
-#     |                                   |
-#     |                                   ----> <QueueNotifier> -> 
-#     |                                         broadcast_queue_positions()
 #     v
-# +-----------------------------+
-# | <CallScheduler> -> stop()   |
-# | * cleanup and shutdown      |
-# +-----------------------------+
+# +----------------------------------+
+# | _consume_call_requests()         |
+# | * assign calls or pause          |
+# +----------------------------------+
 #     |
-#     |----> <AIOKafka> -> stop()
+#     |----> _select_best_node()
+#     |----> _assign_call()
+#           OR
+#     |----> pause()
 #     |
-#     |----> <QueueNotifier> -> stop()
+#     v
+# +----------------------------------+
+# | _consume_events()                |
+# | * handle GPU, lifecycle events   |
+# +----------------------------------+
 #     |
+#     |----> _on_gpu_capacity()
+#     |----> _on_call_finished()
+#     |----> _on_heartbeat()
+#     |
+#     v
+# +----------------------------------+
+# | _resume_paused_partitions()      |
+# | * resume when capacity freed     |
+# +----------------------------------+
+#     |
+#     v
+# +----------------------------------+
+# | _periodic_queue_broadcast()      |
+# | * refresh lag, notify browsers   |
+# +----------------------------------+
+#     |
+#     |----> _refresh_lag_cache()
+#     |----> broadcast_queue_positions()
+#     |
+#     v
 # [ END ]
+# ==========================================================
 
-
+print("[FILE] Entering: scheduler.py")
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -116,7 +113,6 @@ except ImportError:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class NodeState:
-    """Live in-memory view of a single GPU node's capacity."""
 
     __slots__ = (
         "node_id", "max_calls", "active_calls", "free_slots",
@@ -125,6 +121,7 @@ class NodeState:
     )
 
     def __init__(self, cap: GpuCapacity) -> None:
+        print("[FUNC] Enter: __init__")
         self.node_id          = cap.node_id
         self.max_calls        = cap.max_calls
         self.active_calls     = cap.active_calls
@@ -133,18 +130,24 @@ class NodeState:
         self.last_heartbeat   = time.time()
         self.last_capacity_ts = cap.timestamp
         self.active_sessions: Set[str] = set()
+        print("[FUNC] Exit: __init__")
 
     def update(self, cap: GpuCapacity) -> None:
+        print("[FUNC] Enter: update")
         self.max_calls        = cap.max_calls
         self.active_calls     = cap.active_calls
         self.free_slots       = cap.free_slots
         self.partition_index  = cap.partition_index
         self.last_capacity_ts = cap.timestamp
         self.last_heartbeat   = time.time()
+        print("[FUNC] Exit: update")
 
     @property
     def is_alive(self) -> bool:
-        return time.time() - self.last_heartbeat < SCHEDULER_NODE_DEAD_TIMEOUT_SEC
+        print("[FUNC] Enter: is_alive")
+        res = time.time() - self.last_heartbeat < SCHEDULER_NODE_DEAD_TIMEOUT_SEC
+        print("[FUNC] Exit: is_alive")
+        return res
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,37 +155,21 @@ class NodeState:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CallScheduler:
-    """
-    Main Scheduler — Kafka-only, no Redis.
-
-    State lives entirely in self._node_registry (in-memory).
-    Kafka consumer pause/resume acts as the backpressure mechanism instead
-    of a Redis FIFO list.
-    """
 
     def __init__(self) -> None:
+        print("[FUNC] Enter: __init__")
         self._node_registry: Dict[str, NodeState] = {}
 
         # Kafka clients
         self._consumer_requests: Optional["AIOKafkaConsumer"] = None
         self._consumer_events:   Optional["AIOKafkaConsumer"] = None
-        self._producer:          Optional["AIOKafkaProducer"] = None
+        self._producer:           Optional["AIOKafkaProducer"] = None
 
         # Pause/resume state — set of TopicPartitions currently paused
         self._paused_partitions: Set["TopicPartition"] = set()
 
-        # FIX 1+2: ordered deque of full CallRequest objects waiting for a GPU
-        # slot. Storing the full object (not just session_id) ensures the real
-        # room_id is available when broadcasting queue positions to LiveKit rooms.
-        # Appended when a call cannot be assigned; removed when assigned.
-        self._pending_sessions: Deque[CallRequest] = deque()
+        self._pending_sessions: Deque[CallRequest] = deque()  #This is your queue system
 
-        # NOTE: _pending_count is REMOVED (FIX 3).
-        # Queue depth is always computed as len(self._pending_sessions) to
-        # prevent the counter from drifting out of sync with the deque.
-
-        # FIX 4: cached Kafka lag — computed periodically, not per-request.
-        # /queue-status reads _cached_lag directly instead of creating a consumer.
         self._cached_lag: int = 0
         self._lag_cache_ts: float = 0.0
 
@@ -194,15 +181,19 @@ class CallScheduler:
         )
 
         self._running: bool = False
+        print("[FUNC] Exit: __init__")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self) -> None:
+    async def start(self) -> None:  #Connect Kafka + start notifier
+        print("[FUNC] Enter: start")
         if not _AIOKAFKA_AVAILABLE:
+            print("[FUNC] Exit: start")
             raise RuntimeError("aiokafka not installed")
 
         # Shared consumer kwargs factory
         def _ck(group_suffix: str = "") -> dict:
+            print("[FUNC] Enter: _ck")
             gid = CG_SCHEDULER if not group_suffix else f"{CG_SCHEDULER}-{group_suffix}"
             kwargs: dict = dict(
                 bootstrap_servers     = KAFKA_BROKERS,
@@ -218,16 +209,14 @@ class CallScheduler:
                 kwargs["sasl_mechanism"]      = KAFKA_SASL_MECHANISM
                 kwargs["sasl_plain_username"] = KAFKA_SASL_USERNAME
                 kwargs["sasl_plain_password"] = KAFKA_SASL_PASSWORD
+            print("[FUNC] Exit: _ck")
             return kwargs
 
-        # Consumer 1: call_requests — uses the shared scheduler group so that
-        # Kafka partitions are assigned to exactly one replica (leader-by-partition).
         self._consumer_requests = AIOKafkaConsumer(
             TOPIC_CALL_REQUESTS,
             **_ck(),
         )
 
-        # Consumer 2: worker events (capacity, completed, failed, heartbeat)
         self._consumer_events = AIOKafkaConsumer(
             TOPIC_GPU_CAPACITY,
             TOPIC_CALL_COMPLETED,
@@ -236,7 +225,6 @@ class CallScheduler:
             **_ck("events"),
         )
 
-        # Producer: emit assignments to call_assignments topic
         prod_kwargs: dict = dict(
             bootstrap_servers  = KAFKA_BROKERS,
             value_serializer   = lambda v: v,
@@ -259,8 +247,10 @@ class CallScheduler:
 
         self._running = True
         logger.info("[Scheduler] started  node=%s", NODE_ID)
+        print("[FUNC] Exit: start")
 
     async def stop(self) -> None:
+        print("[FUNC] Enter: stop")
         self._running = False
         for client in (
             self._consumer_requests,
@@ -274,59 +264,46 @@ class CallScheduler:
                     pass
         await self._notifier.stop()
         logger.info("[Scheduler] stopped")
+        print("[FUNC] Exit: stop")
 
     # ── Main run ──────────────────────────────────────────────────────────────
 
     async def run(self) -> None:
+        print("[FUNC] Enter: run")
         await self.start()
         try:
-            async with asyncio.TaskGroup() as tg:
+            async with asyncio.TaskGroup() as tg:   #Runs everything in parallel
                 tg.create_task(self._consume_call_requests(),  name="sched-req")
                 tg.create_task(self._consume_events(),         name="sched-events")
                 tg.create_task(self._dead_node_watchdog(),     name="sched-watchdog")
                 tg.create_task(self._periodic_queue_broadcast(), name="sched-broadcast")
         finally:
             await self.stop()
+            print("[FUNC] Exit: run")
 
     # ── Consumer: call_requests ───────────────────────────────────────────────
 
-    async def _consume_call_requests(self) -> None:
-        """
-        Consume call_requests.
-
-        Kafka consumer group assignment guarantees exactly-one partition
-        ownership per Scheduler replica — no leader lock needed.
-
-        Backpressure: when all nodes are full, partitions are paused so Kafka
-        buffers messages broker-side.  They resume when capacity frees up.
-
-        FIX 5: Session IDs are tracked in _pending_sessions deque so that
-        the periodic broadcaster can send accurate per-session positions.
-        """
+    async def _consume_call_requests(self) -> None:  #Handle incoming calls
+        print("[FUNC] Enter: _consume_call_requests")
+    
         async for msg in self._consumer_requests:
             if not self._running:
                 break
             try:
                 req = CallRequest.model_validate_json(msg.value)
 
-                node = self._select_best_node()
+                node = self._select_best_node() #Find worker
                 if node:
-                    await self._assign_call(req, node)
+                    await self._assign_call(req, node) #Node available
                     await self._consumer_requests.commit()
                 else:
-                    # No capacity — pause this partition so Kafka buffers
-                    # the message broker-side.  Do NOT commit the offset;
-                    # the message will be re-delivered after resume.
 
-                    # FIX 1+2: append the full CallRequest so broadcast has
-                    # the correct room_id for DataChannel targeting.
                     if not any(r.session_id == req.session_id for r in self._pending_sessions):
-                        self._pending_sessions.append(req)
+                        self._pending_sessions.append(req) #Add to queue if not already there
 
-                    # FIX 3: use len() — no separate counter
                     tp = TopicPartition(msg.topic, msg.partition)
                     if tp not in self._paused_partitions:
-                        self._consumer_requests.pause(tp)
+                        self._consumer_requests.pause(tp) #Prevents system overload
                         self._paused_partitions.add(tp)
                         logger.info(
                             "[Scheduler] no capacity — paused partition %s:%d  pending=%d",
@@ -344,14 +321,13 @@ class CallScheduler:
                     await self._consumer_requests.commit()
                 except Exception:
                     pass
+        print("[FUNC] Exit: _consume_call_requests")
 
     # ── Consumer: worker events ───────────────────────────────────────────────
 
-    async def _consume_events(self) -> None:
-        """
-        Process gpu_capacity, call_completed, call_failed, worker_heartbeat.
-        All events update in-memory node state; no Redis interaction.
-        """
+    async def _consume_events(self) -> None: #Handle worker updates, call completions/failures, heartbeats
+        print("[FUNC] Enter: _consume_events")
+      
         async for msg in self._consumer_events:
             if not self._running:
                 break
@@ -360,11 +336,11 @@ class CallScheduler:
 
                 if topic == TOPIC_GPU_CAPACITY:
                     cap = GpuCapacity.model_validate_json(msg.value)
-                    await self._on_gpu_capacity(cap)
+                    await self._on_gpu_capacity(cap) #Update node info
 
                 elif topic == TOPIC_WORKER_HEARTBEAT:
                     hb = WorkerHeartbeat.model_validate_json(msg.value)
-                    self._on_heartbeat(hb)
+                    self._on_heartbeat(hb) #Keep node alive
 
                 elif topic == TOPIC_CALL_COMPLETED:
                     evt = CallCompleted.model_validate_json(msg.value)
@@ -392,64 +368,61 @@ class CallScheduler:
                 logger.exception(
                     "[Scheduler] error processing %s: %s", msg.topic, exc
                 )
+        print("[FUNC] Exit: _consume_events")
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
     async def _on_gpu_capacity(self, cap: GpuCapacity) -> None:
-        """Update or register node in the in-memory registry."""
+        print("[FUNC] Enter: _on_gpu_capacity")
+    
         if cap.node_id in self._node_registry:
             self._node_registry[cap.node_id].update(cap)
         else:
             self._node_registry[cap.node_id] = NodeState(cap)
             logger.info("[Scheduler] new node registered  node=%s", cap.node_id)
+        print("[FUNC] Exit: _on_gpu_capacity")
 
     def _on_call_finished(self, node_id: str, session_id: str) -> None:
-        """
-        Decrement active_calls and increment free_slots for the node.
-        Called for both call_completed and call_failed.
-        Pure in-memory — no Redis.
-        """
+        print("[FUNC] Enter: _on_call_finished")
+      
         node = self._node_registry.get(node_id)
         if node:
             node.active_sessions.discard(session_id)
             node.active_calls = max(0, node.active_calls - 1)
             node.free_slots   = max(0, node.free_slots + 1)
+        print("[FUNC] Exit: _on_call_finished")
 
     def _on_heartbeat(self, hb: WorkerHeartbeat) -> None:
-        """Refresh last_heartbeat timestamp for the node."""
+        print("[FUNC] Enter: _on_heartbeat")
+    
         if hb.node_id in self._node_registry:
             self._node_registry[hb.node_id].last_heartbeat = time.time()
         logger.debug(
             "[Scheduler] heartbeat  node=%s  active=%d",
             hb.node_id, hb.active_calls,
         )
+        print("[FUNC] Exit: _on_heartbeat")
 
     # ── Assignment logic ──────────────────────────────────────────────────────
 
     def _select_best_node(self) -> Optional[NodeState]:
-        """Best-fit bin-packing: node with most free slots (alive)."""
+        print("[FUNC] Enter: _select_best_node")
         candidates = [
             n for n in self._node_registry.values()
             if n.free_slots > 0 and n.is_alive
         ]
         if not candidates:
+            print("[FUNC] Exit: _select_best_node")
             return None
-        return max(candidates, key=lambda n: n.free_slots)
+        res = max(candidates, key=lambda n: n.free_slots)
+        print("[FUNC] Exit: _select_best_node")
+        return res
 
     async def _assign_call(self, req: CallRequest, node: NodeState) -> None:
-        """
-        Assign a call to a GPU node.
-
-        1. Pop the session from _pending_sessions if it was queued (FIX 5).
-        2. Update in-memory node state immediately (no Redis).
-        3. Produce assignment to call_assignments topic (node's partition).
-        4. Notify browser via LiveKit DataChannel.
-        """
+        print("[FUNC] Enter: _assign_call")
+    
         req.assigned_node = node.node_id
 
-        # FIX 4: Remove matching CallRequest from the pending deque by scanning
-        # for session_id.  Using .remove(req) would compare full objects; scanning
-        # by session_id is safe and explicit regardless of object equality rules.
         for r in list(self._pending_sessions):
             if r.session_id == req.session_id:
                 self._pending_sessions.remove(r)
@@ -481,17 +454,18 @@ class CallScheduler:
 
         # Notify browser: call is about to start
         await self._notifier.notify_call_starting(req)
+        print("[FUNC] Exit: _assign_call")
 
     # ── Pause / resume Kafka partitions ───────────────────────────────────────
 
     def _resume_paused_partitions(self) -> None:
-        """
-        Resume all paused call_requests partitions when any capacity frees up.
-        The consumer will re-deliver the last un-committed message immediately.
-        """
+        print("[FUNC] Enter: _resume_paused_partitions")
+   
         if not self._paused_partitions or self._consumer_requests is None:
+            print("[FUNC] Exit: _resume_paused_partitions")
             return
         if self._select_best_node() is None:
+            print("[FUNC] Exit: _resume_paused_partitions")
             return   # still no capacity — stay paused
 
         self._consumer_requests.resume(*self._paused_partitions)
@@ -500,44 +474,46 @@ class CallScheduler:
             len(self._paused_partitions),
         )
         self._paused_partitions.clear()
+        print("[FUNC] Exit: _resume_paused_partitions")
 
     # ── Queue position via Kafka lag (FIX 4) ─────────────────────────────────
 
     async def _refresh_lag_cache(self) -> None:
-        """
-        FIX 4: Compute Kafka consumer lag once per broadcast interval and
-        store it in self._cached_lag.  The /queue-status endpoint reads this
-        cached value — it never spins up a new consumer per request.
-        """
-        # FIX 7: use len(self._pending_sessions) as the floor — no _pending_count
+        print("[FUNC] Enter: _refresh_lag_cache")
+
         pending = len(self._pending_sessions)
         if self._consumer_requests is None:
             self._cached_lag = pending
+            print("[FUNC] Exit: _refresh_lag_cache")
             return
         try:
             assignment = self._consumer_requests.assignment()
             if not assignment:
                 self._cached_lag = pending
+                print("[FUNC] Exit: _refresh_lag_cache")
                 return
             end_offsets = await self._consumer_requests.end_offsets(list(assignment))
             lag = sum(
                 max(0, end_off - self._consumer_requests.position(tp))
                 for tp, end_off in end_offsets.items()
             )
-            # FIX 7: floor is len(pending_sessions), not a possibly-drifted counter
+            
             self._cached_lag = max(lag, pending)
             self._lag_cache_ts = time.time()
         except Exception:
             self._cached_lag = pending
+        print("[FUNC] Exit: _refresh_lag_cache")
 
     async def _get_kafka_lag(self) -> int:
-        """Return the most recent cached Kafka lag value."""
-        return self._cached_lag
+        print("[FUNC] Enter: _get_kafka_lag")
+        res = self._cached_lag
+        print("[FUNC] Exit: _get_kafka_lag")
+        return res
 
     # ── Periodic tasks ────────────────────────────────────────────────────────
 
     async def _dead_node_watchdog(self) -> None:
-        """Detect dead nodes and evict them from the registry."""
+        print("[FUNC] Enter: _dead_node_watchdog")
         while self._running:
             await asyncio.sleep(SCHEDULER_NODE_DEAD_TIMEOUT_SEC)
             dead_nodes = [
@@ -551,32 +527,26 @@ class CallScheduler:
                     node.node_id, len(node.active_sessions),
                     len(self._pending_sessions),  # FIX 6: use len(), not _pending_count
                 )
-                # In-flight sessions on this dead node will produce call_failed
-                # events when the WorkerService restarts — no extra recovery needed.
+    
                 del self._node_registry[node.node_id]
             if dead_nodes:
                 self._resume_paused_partitions()
+        print("[FUNC] Exit: _dead_node_watchdog")
 
     async def _periodic_queue_broadcast(self) -> None:
-        """
-        FIX 4: Refresh cached Kafka lag each interval.
-        FIX 5: Broadcast accurate per-session queue positions using the
-               _pending_sessions deque so waiting browsers get correct ETAs.
-        """
+        print("[FUNC] Enter: _periodic_queue_broadcast")
+     
         while self._running:
             await asyncio.sleep(SCHEDULER_QUEUE_BROADCAST_SEC)
             try:
-                # FIX 4: update cached lag
+                # update cached lag
                 await self._refresh_lag_cache()
 
-                # FIX 5: broadcast real CallRequest objects — correct room_ids
-                # FIX 3: use len() directly — no _pending_count
+
                 metric_queue_depth.set(len(self._pending_sessions))
                 metric_active_nodes.set(len([n for n in self._node_registry.values() if n.is_alive]))
                 if self._pending_sessions:
-                    # FIX 5: pass the actual queued CallRequest objects.
-                    # room_id is now the genuine room (not a session_id placeholder)
-                    # so DataChannel messages reach the correct LiveKit rooms.
+                   
                     queue_items: list[CallRequest] = list(self._pending_sessions)
                     await self._notifier.broadcast_queue_positions(queue_items)
                     logger.debug(
@@ -585,15 +555,17 @@ class CallScheduler:
                     )
             except Exception as exc:
                 logger.debug("[Scheduler] periodic broadcast error: %s", exc)
+        print("[FUNC] Exit: _periodic_queue_broadcast")
 
 
 # ── Kafka consumer kwargs factory ─────────────────────────────────────────────
 
 def _kafka_consumer_kwargs(group_id: str) -> dict:
+    print("[FUNC] Enter: _kafka_consumer_kwargs")
     kwargs: dict = dict(
-        bootstrap_servers      = KAFKA_BROKERS,
+        bootstrap_servers       = KAFKA_BROKERS,
         group_id               = group_id,
-        auto_offset_reset      = KAFKA_AUTO_OFFSET_RESET,
+        auto_offset_reset       = KAFKA_AUTO_OFFSET_RESET,
         enable_auto_commit     = KAFKA_ENABLE_AUTO_COMMIT,
         max_poll_interval_ms   = KAFKA_MAX_POLL_INTERVAL_MS,
         session_timeout_ms     = KAFKA_SESSION_TIMEOUT_MS,
@@ -604,28 +576,29 @@ def _kafka_consumer_kwargs(group_id: str) -> dict:
         kwargs["sasl_mechanism"]      = KAFKA_SASL_MECHANISM
         kwargs["sasl_plain_username"] = KAFKA_SASL_USERNAME
         kwargs["sasl_plain_password"] = KAFKA_SASL_PASSWORD
+    print("[FUNC] Exit: _kafka_consumer_kwargs")
     return kwargs
-
 
 # ── Module-level singleton (used when scheduler runs in-process) ──────────────
 
-# FIX 4: when the Scheduler and FastAPI share the same process (e.g. dev mode)
-# this singleton allows /queue-status to read the cached lag without any
-# Kafka I/O per request.
 _scheduler_instance: Optional[CallScheduler] = None
 
 
 def get_cached_lag() -> int:
-    """Return the most recent queue lag cached by the running Scheduler.
-    Returns 0 when the Scheduler runs out-of-process (multi-process prod deploy)."""
+    print("[FUNC] Enter: get_cached_lag")
+
     if _scheduler_instance is not None:
-        return _scheduler_instance._cached_lag
+        res = _scheduler_instance._cached_lag
+        print("[FUNC] Exit: get_cached_lag")
+        return res
+    print("[FUNC] Exit: get_cached_lag")
     return 0
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _main() -> None:
+    print("[FUNC] Enter: _main")
     global _scheduler_instance
     logging.basicConfig(
         level  = logging.INFO,
@@ -640,7 +613,7 @@ async def _main() -> None:
     finally:
         await scheduler.stop()
         _scheduler_instance = None
-
+        print("[FUNC] Exit: _main")
 
 if __name__ == "__main__":
     import asyncio as _asyncio

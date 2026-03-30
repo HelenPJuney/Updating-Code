@@ -1,4 +1,3 @@
-
 # [ START ]
 #     |
 #     v
@@ -18,16 +17,9 @@
 # +--------------------------+
 #     |
 #     v
-# +--------------------------+
-# | <BaseModel> ->           |
-# | model_validate_json()    |
-# | * inbound validation     |
-# +--------------------------+
-#     |
-#     v
 # [ YIELD ]
 
-
+print("[FILE] Entering: schemas.py")
 import time
 import uuid
 from typing import Optional
@@ -39,11 +31,8 @@ from pydantic import BaseModel, Field
 # Outbound (FastAPI → Kafka)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CallRequest(BaseModel):
-    """
-    Produced by FastAPI /livekit/token or by the SIP ingress webhook.
-    Consumed by the Scheduler and re-emitted to the target node partition.
-    """
+class CallRequest(BaseModel):#Represents a new call request
+   
     schema_version: int   = 1
     session_id:     str   = Field(default_factory=lambda: str(uuid.uuid4()))
     room_id:        str   = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -53,27 +42,9 @@ class CallRequest(BaseModel):
     model_path:     str   = ""
     agent_name:     str   = ""
     timestamp:      float = Field(default_factory=time.time)
-    priority:       int   = 0        # 0=standard, 5=priority, 10=VIP
+    priority:       int   = 0        # reserved for future VIP lanes
     retry_count:    int   = 0        # incremented on re-schedule after failure
     assigned_node:  Optional[str] = None   # set by Scheduler before forwarding
-    source:         str   = "browser"      # "browser" or "sip" — call origin
-    caller_number:  str   = ""             # SIP caller phone number / URI
-
-    # ── Routing fields (set by RoutingEngine before Kafka submission) ──────────
-    required_skills:  list[str]       = Field(default_factory=list)
-    # e.g. ["billing", "spanish"] — matched against NodeState.skills
-    routing_rule:     str             = ""
-    # name of the matched routing rule for observability
-    queue_name:       str             = "default"
-    # logical queue name: "default" | "vip" | "callback" | "overflow"
-    fallback_action:  str             = "queue"
-    # action when no node available: "queue" | "voicemail" | "callback" | "ai_bot"
-    ai_assist_mode:   bool            = False
-    # True → AI joins as silent observer, human agent is primary
-    escalation_target: Optional[str] = None
-    # human agent identity to transfer to (LiveKit participant identity)
-    scheduled_job_id: Optional[str]  = None
-    # set when call was triggered by ScheduledCallService
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -81,10 +52,7 @@ class CallRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class GpuCapacity(BaseModel):
-    """
-    Published by each Worker Service to the gpu_capacity topic every 5 s.
-    The Scheduler maintains a live node_registry from these messages.
-    """
+    
     node_id:        str
     hostname:       str   = ""
     max_calls:      int   = 0
@@ -104,7 +72,7 @@ class GpuCapacity(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CallStarted(BaseModel):
-    """Produced once the Worker Service successfully starts ai_worker_task."""
+    
     session_id:  str
     room_id:     str
     node_id:     str
@@ -113,7 +81,7 @@ class CallStarted(BaseModel):
 
 
 class CallCompleted(BaseModel):
-    """Produced when ai_worker_task exits normally (hangup / disconnect)."""
+   
     session_id:    str
     room_id:       str
     node_id:       str
@@ -122,7 +90,7 @@ class CallCompleted(BaseModel):
 
 
 class CallFailed(BaseModel):
-    """Produced when ai_worker_task raises an unrecoverable exception."""
+    
     session_id:   str
     room_id:      str
     node_id:      str
@@ -132,11 +100,11 @@ class CallFailed(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Heartbeat (Worker Service → Scheduler)
+# Heartbeat (Worker Service → Scheduler(alive signal))
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class WorkerHeartbeat(BaseModel):
-    """Dead-man's switch. Scheduler marks node dead if gap > 30 s."""
+    
     node_id:      str
     alive:        bool  = True
     active_calls: int   = 0
@@ -148,60 +116,12 @@ class WorkerHeartbeat(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class QueueUpdate(BaseModel):
-    """Sent to browser while caller is in the waiting queue."""
+   
     type:      str   = "queue_update"
     position:  int   = 1
     eta_sec:   int   = 120
 
 
 class CallStart(BaseModel):
-    """Sent to browser immediately before the AI worker joins the room."""
+  
     type: str = "call_start"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Agent State (Human Agent → System)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class AgentState(BaseModel):
-    """
-    Published when a human agent comes online/offline or changes availability.
-    Consumed by the RoutingEngine to update the agent registry.
-    """
-    agent_id:     str
-    name:         str   = ""
-    skills:       list[str] = Field(default_factory=list)
-    # e.g. ["billing", "english", "tier1"]
-    available:    bool  = True
-    max_calls:    int   = 1
-    active_calls: int   = 0
-    node_id:      str   = ""   # LiveKit room / participant identity
-    timestamp:    float = Field(default_factory=time.time)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Escalation (AI Worker → Human Agent)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class EscalationRequest(BaseModel):
-    """
-    Sent via DataChannel when AI decides to transfer call to human.
-    Also published to Kafka for routing engine to pick up.
-    """
-    type:             str   = "escalation_request"
-    session_id:       str   = ""
-    room_id:          str   = ""
-    reason:           str   = ""   # "user_request" | "complexity" | "sentiment"
-    required_skills:  list[str] = Field(default_factory=list)
-    transcript_summary: str = ""
-    timestamp:        float = Field(default_factory=time.time)
-
-
-class EscalationResponse(BaseModel):
-    """Sent back to browser/AI when escalation is accepted or rejected."""
-    type:         str  = "escalation_response"
-    accepted:     bool = False
-    agent_id:     str  = ""
-    agent_name:   str  = ""
-    eta_sec:      int  = 0
-    reason:       str  = ""

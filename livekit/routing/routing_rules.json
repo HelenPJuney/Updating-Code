@@ -94,6 +94,38 @@
       }
     },
     {
+      "name": "browser_inbound",
+      "priority": 12,
+      "enabled": true,
+      "conditions": {
+        "source": ["browser"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "browser",
+        "priority_override": 2,
+        "required_skills": [],
+        "ai_config": {},
+        "fallback_action": "ai_bot"
+      }
+    },
+    {
+      "name": "external_browser_inbound",
+      "priority": 13,
+      "enabled": true,
+      "conditions": {
+        "source": ["external_browser"],
+        "priority_gte": 0
+      },
+      "target": {
+        "queue_name": "browser",
+        "priority_override": 2,
+        "required_skills": [],
+        "ai_config": {},
+        "fallback_action": "ai_bot"
+      }
+    },
+    {
       "name": "after_hours",
       "priority": 20,
       "enabled": true,

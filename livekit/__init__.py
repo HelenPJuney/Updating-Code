@@ -1,69 +1,15 @@
-"""
-backend/livekit
-──────────────────────────────────────────────────────────────────────────────
-LiveKit-based communication layer — replaces the old aiortc WebRTC layer.
-Now includes Kafka-based call scheduling, GPU-aware scaling, and SIP/PSTN
-telephony support.
-
-Integration in backend/app.py:
-
-    # Minimal (no Kafka):
-    from backend.livekit import livekit_router
-    app.include_router(livekit_router)
-
-    # Full (with Kafka producer lifecycle):
-    from backend.livekit import livekit_router, kafka_health_router
-    from backend.livekit.kafka.lifespan import kafka_lifespan
-    app = FastAPI(lifespan=kafka_lifespan)
-    app.include_router(livekit_router)
-    app.include_router(kafka_health_router)   # /livekit/kafka/health + /metrics
-
-    # With SIP support (set ENABLE_SIP=true):
-    from backend.livekit import sip_router   # only available when ENABLE_SIP=true
-    if sip_router:
-        app.include_router(sip_router)
-
-Endpoints:
-    GET  /livekit/token              — issue JWT + submit to Kafka Scheduler
-    GET  /livekit/health             — LiveKit + Kafka connectivity status
-    GET  /livekit/queue-status/{id}  — poll queue position for a session
-    GET  /livekit/kafka/health       — Kafka integration liveness check
-    GET  /livekit/kafka/metrics      — Prometheus metrics
-
-SIP Endpoints (when ENABLE_SIP=true):
-    POST /sip/webhook                — LiveKit webhook receiver (SIP events)
-    GET  /sip/health                 — SIP subsystem health check
-    GET  /sip/sessions               — List active SIP sessions
-    GET  /sip/session/{id}           — Lookup specific SIP session
-
-Call flow (Kafka path — browser):
-    Browser → GET /livekit/token
-    Backend → produce call_request → Kafka → Call Scheduler
-    Scheduler → GPU-aware assignment → Worker Service on GPU Node
-    Worker Service → spawn ai_worker_task → LiveKit room.connect
-    Worker  → VAD → STT → LLM → TTS → publish audio track
-    Browser ← DataChannel: queue_update | call_start | greeting | transcript …
-
-Call flow (SIP/PSTN path):
-    PSTN → SIP Provider → Asterisk → LiveKit SIP → LiveKit Room
-    LiveKit webhook → /sip/webhook → Kafka call_requests → Scheduler
-    Scheduler → Worker Service → ai_worker_task → same AI pipeline
-    SIP caller audio ↔ LiveKit ↔ AI worker audio
-
-Call flow (fallback — no Kafka):
-    Identical to original: ai_worker_task spawned directly by FastAPI.
-
-Control channel (LiveKit DataChannel):
-    Browser → Worker : { type: "interrupt" } | { type: "hangup" }
-    Worker  → Browser: { type: "greeting" }  | { type: "transcript" }
-                     | { type: "response" }  | { type: "barge_in" }
-                     | { type: "error" }     | { type: "hangup" }
-                     | { type: "queue_update", "position": N, "eta_sec": N }
-                     | { type: "call_start" }
-"""
 
 from .ai_worker import livekit_router
 from .kafka.health import kafka_health_router
+from .browser import browser_router
+
+# ── FIX #3: Load routing rules into the process-wide singleton at import time ──
+# All routers (browser, SIP, integration) call get_routing_engine() to get this
+from .routing.singleton import load_routing_rules, get_routing_engine
+try:
+    load_routing_rules()
+except Exception:
+    pass  # non-fatal: rules will be empty, default_fallback rule will apply
 
 # ── SIP/PSTN support (conditionally loaded via ENABLE_SIP env var) ────────────
 sip_router = None
@@ -79,16 +25,13 @@ __all__ = [
     "livekit_router",
     "kafka_health_router",
     "sip_router",
+    "browser_router",
+    "load_routing_rules",
+    "get_routing_engine",
 ]
 
-# ── WebSocket event integration — hook into Kafka events ─────────────────────
-# These hooks emit events to the EventHub when call lifecycle events occur.
-# They are optional: if the websocket module fails to load, the rest works.
 def _attach_event_hooks() -> None:
-    """
-    Monkey-patch Kafka lifecycle publish methods to also emit to EventHub.
-    Called once at import time — safe to call multiple times (idempotent).
-    """
+  
     try:
         from .websocket import event_hub
         from .kafka import worker_service as _ws_mod
@@ -96,9 +39,6 @@ def _attach_event_hooks() -> None:
         _orig_started   = _ws_mod.WorkerService._publish_started.__func__   if hasattr(_ws_mod.WorkerService._publish_started, "__func__") else None
         _orig_completed = _ws_mod.WorkerService._publish_completed.__func__ if hasattr(_ws_mod.WorkerService._publish_completed, "__func__") else None
 
-        # NOTE: We emit to EventHub from the Kafka consumer side via the
-        # scheduler's _consume_events loop instead, to avoid circular imports.
-        # The hub receives events via the /ws/publish endpoint or direct calls.
         pass
     except Exception:
         pass

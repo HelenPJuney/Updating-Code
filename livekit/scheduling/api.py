@@ -3,14 +3,10 @@
 #     v
 # +-----------------------------+
 # | _parse_epoch(dt_str)        |
-# | * Internal parsing utility  |
+# | * Validate the datetime  |
 # +-----------------------------+
 #     |
-#     | [ Conversion Logic ]
-#     |----> IF numeric string: return float(timestamp)
-#     |----> ELSE: datetime.fromisoformat()
-#     |----> IF no tz: set to UTC
-#     |----> RETURN: Unix epoch (float)
+#     |
 #     v
 # +-----------------------------+
 # | POST /jobs                  |

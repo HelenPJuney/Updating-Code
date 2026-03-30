@@ -338,10 +338,16 @@ class RoutingEngine:
             if getattr(req, "priority", 0) < cond.priority_gte:
                 return False
 
-        # caller number prefix
+        # caller number prefix (SIP)
         if cond.caller_number_prefix:
             caller = getattr(req, "caller_number", "")
             if not any(caller.startswith(pfx) for pfx in cond.caller_number_prefix):
+                return False
+
+        # caller id prefix (browser)
+        if cond.caller_id_prefix:
+            cid = getattr(req, "caller_id", "")
+            if not any(cid.startswith(pfx) for pfx in cond.caller_id_prefix):
                 return False
 
         # time of day: INSIDE window

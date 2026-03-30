@@ -118,9 +118,9 @@ except ImportError:
     logger.error("[WorkerSvc] aiokafka not installed — Worker Service cannot start")
 
 # FIX 2: absolute import — stable whether running as a package or a standalone
-# process (python -m backend.livekit.kafka.worker_service).
+# process (python -m livekit.kafka.worker_service).
 try:
-    from backend.livekit.ai_worker import ai_worker_task
+    from livekit.ai_worker import ai_worker_task
     _AI_WORKER_AVAILABLE = True
 except ImportError:
     try:
@@ -130,7 +130,7 @@ except ImportError:
         _AI_WORKER_AVAILABLE = False
         logger.error(
             "[WorkerSvc] ai_worker_task not importable — "
-            "ensure backend.livekit is on PYTHONPATH"
+            "ensure livekit is on PYTHONPATH"
         )
 
 # Node partition index (set via env var; one value per physical GPU host)

@@ -1,11 +1,62 @@
-"""
-main.py — FastAPI entry point for LiveKit + SIP backend.
-
-Run:
-    python main.py
-    OR
-    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-"""
+# [ START ]
+#     |
+#     v
+# +-----------------------------+
+# | app_lifespan()              |
+# | * Startup Sequence          |
+# +-----------------------------+
+#     |
+#     | [ 1. Connect Producers ]
+#     |----> Kafka: producer.start()
+#     |
+#     | [ 2. Init Business Logic ]
+#     |----> Routing: routing_engine.load_rules()
+#     |----> Scheduling: await scheduling_service.start()
+#     |
+#     | [ 3. Signaling ]
+#     |----> WebSocket: event_hub.publish_system_status(online=True)
+#     |
+#     | [ 4. Application Run ]
+#     |----> yield (App accepts requests)
+#     |
+#     | [ 5. Shutdown Sequence ]
+#     |----> await scheduling_service.stop()
+#     |----> await producer.stop()
+#     v
+# +-----------------------------+
+# | Router Mounting             |
+# | * Endpoint Registration     |
+# +-----------------------------+
+#     |
+#     |----> Core: livekit_router, kafka_health_router
+#     |----> Features: routing_router, scheduling_router
+#     |----> Real-time: ws_router (WebSocket/SSE)
+#     |----> Conditional: IF ENABLE_SIP -> sip_router
+#     v
+# +-----------------------------+
+# | GET / (root)                |
+# | * Quick Status              |
+# +-----------------------------+
+#     |
+#     |----> Collect node_summary (offline_handler)
+#     |----> Count WebSocket subscribers
+#     |----> RETURN: Version, Endpoints, System counts
+#     v
+# +-----------------------------+
+# | GET /health                 |
+# | * Deep System Check         |
+# +-----------------------------+
+#     |
+#     | [ Multi-service Diagnostics ]
+#     |----> Kafka: check is_kafka_active
+#     |----> Offline: check_status() & node_summary
+#     |----> Sessions: livekit_session_manager.count
+#     |----> Scheduling: scheduling_service.stats()
+#     |----> Routing: count loaded rules
+#     |
+#     |----> RETURN: Aggregated health JSON
+#     v
+# [ YIELD ]
 
 import os
 import sys
@@ -25,8 +76,7 @@ from livekit.routing import routing_engine, routing_router
 from livekit.scheduling import scheduling_service, scheduling_router
 from livekit.websocket import event_hub, ws_router
 from livekit.offline import offline_handler
-from livekit.integration import integration_router, integration_service
-from livekit.ai_assist import ai_assist_router
+
 
 # ── Extended lifespan: start/stop all services ────────────────────────────────
 @asynccontextmanager
@@ -52,17 +102,9 @@ async def app_lifespan(app: FastAPI):
         online=True, active_nodes=0, queue_depth=0
     )
 
-    # ── Integration service ──────────────────────────────────────────────────
-    try:
-        await integration_service.start()
-        print("✓ Integration service started")
-    except Exception as exc:
-        print(f"  Integration service failed to start: {exc}")
-
     yield  # ── application runs ──────────────────────────────────────────────
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
-    await integration_service.stop()
     await scheduling_service.stop()
     await producer.stop()
     print("  All services stopped")
@@ -90,8 +132,6 @@ app.include_router(kafka_health_router)  # /livekit/kafka/health, /metrics
 app.include_router(routing_router)       # /routing/rules, /routing/agents, /routing/decision
 app.include_router(scheduling_router)    # /scheduling/jobs, /scheduling/stats
 app.include_router(ws_router)            # /ws/events (WebSocket), /ws/stream (SSE)
-app.include_router(integration_router, prefix="/integration") # Feature 1: External App Integration
-app.include_router(ai_assist_router)     # Feature 2: AI Auto-join
 
 # ── SIP / PSTN routes (only if ENABLE_SIP=true) ────────────────────────────────
 from livekit import sip_router
