@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# backend/livekit/kafka/requirements.txt
+# Dependencies for the Kafka-only call scheduling layer.
+# Redis has been REMOVED.
+#
+# Install with:
+#     pip install -r backend/livekit/kafka/requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- Kafka -------------------------------------------------------------------
+aiokafka>=0.10.0          # async Kafka producer + consumer
+
+# --- GPU monitoring ----------------------------------------------------------
+pynvml>=11.5.0            # NVIDIA NVML Python bindings (GPU VRAM / util)
+
+# --- Observability -----------------------------------------------------------
+prometheus-client>=0.20.0  # Prometheus metrics exposition
+
+# --- LiveKit -----------------------------------------------------------------
+livekit-api>=0.5.0        # server SDK for DataChannel send_data
+livekit-rtc>=0.7.0        # real-time SDK for room.connect
+
+# --- Web framework -----------------------------------------------------------
+fastapi>=0.110.0
+pydantic>=2.0.0
+uvicorn[standard]>=0.28.0
