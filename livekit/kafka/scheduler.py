@@ -121,6 +121,7 @@ class NodeState:
     )
 
     def __init__(self, cap: GpuCapacity) -> None:
+        logger.debug("Executing NodeState.__init__")
         print("[FUNC] Enter: __init__")
         self.node_id          = cap.node_id
         self.max_calls        = cap.max_calls
@@ -133,6 +134,7 @@ class NodeState:
         print("[FUNC] Exit: __init__")
 
     def update(self, cap: GpuCapacity) -> None:
+        logger.debug("Executing NodeState.update")
         print("[FUNC] Enter: update")
         self.max_calls        = cap.max_calls
         self.active_calls     = cap.active_calls
@@ -144,6 +146,7 @@ class NodeState:
 
     @property
     def is_alive(self) -> bool:
+        logger.debug("Executing NodeState.is_alive")
         print("[FUNC] Enter: is_alive")
         res = time.time() - self.last_heartbeat < SCHEDULER_NODE_DEAD_TIMEOUT_SEC
         print("[FUNC] Exit: is_alive")
@@ -157,6 +160,7 @@ class NodeState:
 class CallScheduler:
 
     def __init__(self) -> None:
+        logger.debug("Executing CallScheduler.__init__")
         print("[FUNC] Enter: __init__")
         self._node_registry: Dict[str, NodeState] = {}
 
@@ -186,6 +190,7 @@ class CallScheduler:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:  #Connect Kafka + start notifier
+        logger.debug("Executing CallScheduler.start")
         print("[FUNC] Enter: start")
         if not _AIOKAFKA_AVAILABLE:
             print("[FUNC] Exit: start")
@@ -193,6 +198,7 @@ class CallScheduler:
 
         # Shared consumer kwargs factory
         def _ck(group_suffix: str = "") -> dict:
+            logger.debug("Executing CallScheduler._ck")
             print("[FUNC] Enter: _ck")
             gid = CG_SCHEDULER if not group_suffix else f"{CG_SCHEDULER}-{group_suffix}"
             kwargs: dict = dict(
@@ -250,6 +256,7 @@ class CallScheduler:
         print("[FUNC] Exit: start")
 
     async def stop(self) -> None:
+        logger.debug("Executing CallScheduler.stop")
         print("[FUNC] Enter: stop")
         self._running = False
         for client in (
@@ -269,6 +276,7 @@ class CallScheduler:
     # ── Main run ──────────────────────────────────────────────────────────────
 
     async def run(self) -> None:
+        logger.debug("Executing CallScheduler.run")
         print("[FUNC] Enter: run")
         await self.start()
         try:
@@ -284,6 +292,7 @@ class CallScheduler:
     # ── Consumer: call_requests ───────────────────────────────────────────────
 
     async def _consume_call_requests(self) -> None:  #Handle incoming calls
+        logger.debug("Executing CallScheduler._consume_call_requests")
         print("[FUNC] Enter: _consume_call_requests")
     
         async for msg in self._consumer_requests:
@@ -326,6 +335,7 @@ class CallScheduler:
     # ── Consumer: worker events ───────────────────────────────────────────────
 
     async def _consume_events(self) -> None: #Handle worker updates, call completions/failures, heartbeats
+        logger.debug("Executing CallScheduler._consume_events")
         print("[FUNC] Enter: _consume_events")
       
         async for msg in self._consumer_events:
@@ -373,6 +383,7 @@ class CallScheduler:
     # ── Event handlers ────────────────────────────────────────────────────────
 
     async def _on_gpu_capacity(self, cap: GpuCapacity) -> None:
+        logger.debug("Executing CallScheduler._on_gpu_capacity")
         print("[FUNC] Enter: _on_gpu_capacity")
     
         if cap.node_id in self._node_registry:
@@ -383,6 +394,7 @@ class CallScheduler:
         print("[FUNC] Exit: _on_gpu_capacity")
 
     def _on_call_finished(self, node_id: str, session_id: str) -> None:
+        logger.debug("Executing CallScheduler._on_call_finished")
         print("[FUNC] Enter: _on_call_finished")
       
         node = self._node_registry.get(node_id)
@@ -393,6 +405,7 @@ class CallScheduler:
         print("[FUNC] Exit: _on_call_finished")
 
     def _on_heartbeat(self, hb: WorkerHeartbeat) -> None:
+        logger.debug("Executing CallScheduler._on_heartbeat")
         print("[FUNC] Enter: _on_heartbeat")
     
         if hb.node_id in self._node_registry:
@@ -406,6 +419,7 @@ class CallScheduler:
     # ── Assignment logic ──────────────────────────────────────────────────────
 
     def _select_best_node(self) -> Optional[NodeState]:
+        logger.debug("Executing CallScheduler._select_best_node")
         print("[FUNC] Enter: _select_best_node")
         candidates = [
             n for n in self._node_registry.values()
@@ -419,6 +433,7 @@ class CallScheduler:
         return res
 
     async def _assign_call(self, req: CallRequest, node: NodeState) -> None:
+        logger.debug("Executing CallScheduler._assign_call")
         print("[FUNC] Enter: _assign_call")
     
         req.assigned_node = node.node_id
@@ -459,6 +474,7 @@ class CallScheduler:
     # ── Pause / resume Kafka partitions ───────────────────────────────────────
 
     def _resume_paused_partitions(self) -> None:
+        logger.debug("Executing CallScheduler._resume_paused_partitions")
         print("[FUNC] Enter: _resume_paused_partitions")
    
         if not self._paused_partitions or self._consumer_requests is None:
@@ -479,6 +495,7 @@ class CallScheduler:
     # ── Queue position via Kafka lag (FIX 4) ─────────────────────────────────
 
     async def _refresh_lag_cache(self) -> None:
+        logger.debug("Executing CallScheduler._refresh_lag_cache")
         print("[FUNC] Enter: _refresh_lag_cache")
 
         pending = len(self._pending_sessions)
@@ -505,6 +522,7 @@ class CallScheduler:
         print("[FUNC] Exit: _refresh_lag_cache")
 
     async def _get_kafka_lag(self) -> int:
+        logger.debug("Executing CallScheduler._get_kafka_lag")
         print("[FUNC] Enter: _get_kafka_lag")
         res = self._cached_lag
         print("[FUNC] Exit: _get_kafka_lag")
@@ -513,6 +531,7 @@ class CallScheduler:
     # ── Periodic tasks ────────────────────────────────────────────────────────
 
     async def _dead_node_watchdog(self) -> None:
+        logger.debug("Executing CallScheduler._dead_node_watchdog")
         print("[FUNC] Enter: _dead_node_watchdog")
         while self._running:
             await asyncio.sleep(SCHEDULER_NODE_DEAD_TIMEOUT_SEC)
@@ -534,6 +553,7 @@ class CallScheduler:
         print("[FUNC] Exit: _dead_node_watchdog")
 
     async def _periodic_queue_broadcast(self) -> None:
+        logger.debug("Executing CallScheduler._periodic_queue_broadcast")
         print("[FUNC] Enter: _periodic_queue_broadcast")
      
         while self._running:
@@ -561,6 +581,7 @@ class CallScheduler:
 # ── Kafka consumer kwargs factory ─────────────────────────────────────────────
 
 def _kafka_consumer_kwargs(group_id: str) -> dict:
+    logger.debug("Executing _kafka_consumer_kwargs")
     print("[FUNC] Enter: _kafka_consumer_kwargs")
     kwargs: dict = dict(
         bootstrap_servers       = KAFKA_BROKERS,
@@ -585,6 +606,7 @@ _scheduler_instance: Optional[CallScheduler] = None
 
 
 def get_cached_lag() -> int:
+    logger.debug("Executing get_cached_lag")
     print("[FUNC] Enter: get_cached_lag")
 
     if _scheduler_instance is not None:
@@ -598,6 +620,7 @@ def get_cached_lag() -> int:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _main() -> None:
+    logger.debug("Executing _main")
     print("[FUNC] Enter: _main")
     global _scheduler_instance
     logging.basicConfig(

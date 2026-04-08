@@ -89,6 +89,7 @@ class CallRequestProducer:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing CallRequestProducer.__init__")
         self._producer: Optional["AIOKafkaProducer"] = None
         self._started:  bool = False
         self._fallback: bool = False   # True → bypass Kafka, spawn directly
@@ -100,6 +101,7 @@ class CallRequestProducer:
         Connect the Kafka producer.
         Called once at FastAPI startup (lifespan / startup event).
         """
+        logger.debug("Executing CallRequestProducer.start")
         if not _AIOKAFKA_AVAILABLE:
             logger.warning("[Producer] Running WITHOUT Kafka (aiokafka missing)")
             self._fallback = True
@@ -109,9 +111,7 @@ class CallRequestProducer:
             bootstrap_servers   = KAFKA_BROKERS,
             acks                = KAFKA_PRODUCER_ACKS,
             enable_idempotence  = KAFKA_ENABLE_IDEMPOTENCE,
-            retries             = KAFKA_PRODUCER_RETRIES,
             request_timeout_ms  = KAFKA_REQUEST_TIMEOUT_MS,
-            delivery_timeout_ms = KAFKA_DELIVERY_TIMEOUT_MS,
             value_serializer    = lambda v: v,   # caller passes bytes
             key_serializer      = lambda k: k.encode() if isinstance(k, str) else k,
         )
@@ -140,6 +140,7 @@ class CallRequestProducer:
 
     async def stop(self) -> None:
         """Flush and close producer. Call at FastAPI shutdown."""
+        logger.debug("Executing CallRequestProducer.stop")
         if self._producer:
             try:
                 await self._producer.stop()
@@ -163,6 +164,7 @@ class CallRequestProducer:
             Returns None when Kafka is unavailable.  The caller in ai_worker.py
             detects this and spawns ai_worker_task directly.
         """
+        logger.debug("Executing CallRequestProducer.submit_call_request")
         if self._fallback or self._producer is None:
             logger.debug(
                 "[Producer] fallback: no Kafka — caller must spawn directly  session=%s",
@@ -196,6 +198,7 @@ class CallRequestProducer:
 
     @property
     def is_kafka_active(self) -> bool:
+        logger.debug("Executing CallRequestProducer.is_kafka_active")
         return not self._fallback and self._producer is not None
 
 
@@ -205,6 +208,7 @@ _producer_instance: Optional[CallRequestProducer] = None
 
 def get_producer() -> CallRequestProducer:
     """Return the module-level singleton producer (created lazily)."""
+    logger.debug("Executing get_producer")
     global _producer_instance
     if _producer_instance is None:
         _producer_instance = CallRequestProducer()

@@ -1,64 +1,33 @@
-# [ START: LiveKit Webhook Events ]
-#     |
-#     +-----> on_room_started() / on_track_published() [ Logs Only ]
-#     |
-#     v
-# +-------------------------------------------------+
-# | on_participant_joined()                         |
-# | * Main entry point for both Caller and AI       |
-# +-------------------------------------------------+
-#     |
-#     |--- (If SIP Caller Joins)
-#     |      |
-#     |      |----> sip_session_mgr.register()
-#     |      |----> _start_ringing_timeout() ----------+--> _ringing_watchdog() [If AI doesn't join]
-#     |      |                                         |      |--> sip_session_mgr.mark_failed()
-#     |      v                                         |      |--> _publish_sip_call_failed()
-#     |  _publish_sip_call_request()                   |      +--> _delayed_room_cleanup()
-#     |      |                                         |
-#     |      +--> [If Kafka fails]                     |
-#     |             |--> _fallback_direct_spawn()      |
-#     |                                                |
-#     |--- (If AI Worker Joins)                        |
-#            |                                         |
-#            |----> sip_session_mgr.mark_connected()   |
-#            |----> _cancel_timeout() <----------------+ [Stops ringing watchdog]
-#            |----> _start_call_timeout() -------------+
-#                                                      |
-#                                                      v
-# [ ACTIVE CALL IN PROGRESS ]                  _call_watchdog() [If call hits max duration]
-#     |                                                |
-#     v                                                |--> sip_session_mgr.mark_completed()
-# +-------------------------------------------------+  |--> _publish_sip_call_completed()
-# | on_participant_left()                           |  +--> _delayed_room_cleanup()
-# | * Triggered when SIP caller hangs up            |  |
-# +-------------------------------------------------+  |
-#     |                                                |
-#     |----> _cancel_timeout() <-----------------------+ [Stops max duration watchdog]
-#     |----> sip_session_mgr.mark_completed()
-#     |----> _publish_sip_call_completed()
-#     |----> _trigger_recording_save()
-#     |
-#     v
-# +-------------------------------------------------+
-# | _delayed_room_cleanup()                         |
-# | * Waits 2 seconds, then destroys room           |
-# +-------------------------------------------------+
-#     |
-#     |----> LiveKitAPI.delete_room()
-#     |----> sip_session_mgr.remove()
-#     |
-#     v
-# +-------------------------------------------------+
-# | on_room_finished()                              |
-# | * Final safety net if LiveKit destroys room     |
-# +-------------------------------------------------+
-#     |
-#     |----> _cancel_timeout()
-#     |----> sip_session_mgr.mark_completed()
-#     |----> sip_session_mgr.remove()
-#     |
-# [ END ]
+# [ START: LIVEKIT WEBHOOK EVENT ]
+#       |
+#       |--- on_participant_joined()
+#       |    * Filter: Only SIP_PARTICIPANT_PREFIX
+#       |    * Register session in sip_session_mgr
+#       |    `--> _publish_sip_call_request()
+#       |         * Send to Kafka (or _fallback_direct_spawn)
+#       |         * _start_ringing_timeout()
+#       |
+#       |--- on_track_published()
+#       |    * Log media flow start
+#       |
+#       |--- on_participant_left()
+#       |    * Mark COMPLETED in manager
+#       |    * _publish_sip_call_completed()
+#       |    * _trigger_recording_save() (CDR)
+#       |    `--> _delayed_room_cleanup()
+#       |
+#       `--- on_room_finished()
+#       |    * Final session removal cleanup
+#       v
+# +------------------------------------------+
+# | TIMEOUT WATCHDOGS                        |
+# | * _start_ringing_timeout() (Pending AI)  |
+# | * _start_call_timeout()    (Max duration)|
+# | * _cancel_timeout()        (Stop tasks)  |
+# +------------------------------------------+
+#       |
+#       v
+# [ END: SESSION PERSISTED / CLEANED ]
 
 import asyncio
 import logging
@@ -107,6 +76,7 @@ class SipEventHandler:
         We only log here — the actual session creation happens when the SIP
         participant joins, because that's when we have caller identity info.
         """
+        logger.debug("Executing SipEventHandler.on_room_started")
         logger.info(
             "[SipHandler] room_started  room=%s  sid=%s",
             room_name[:12], room_sid[:12],
@@ -122,6 +92,7 @@ class SipEventHandler:
     ) -> Optional[SipSession]:
       
         # Only handle SIP participants
+        logger.debug("Executing SipEventHandler.on_participant_joined")
         if not participant_identity.startswith(SIP_PARTICIPANT_PREFIX):
             logger.debug(
                 "[SipHandler] non-SIP participant joined  identity=%s  room=%s",
@@ -207,6 +178,7 @@ class SipEventHandler:
         Called when a track is published in a room.
         For SIP calls, the first audio track indicates media is flowing.
         """
+        logger.debug("Executing SipEventHandler.on_track_published")
         if not participant_identity.startswith(SIP_PARTICIPANT_PREFIX):
             return
 
@@ -232,6 +204,7 @@ class SipEventHandler:
         call_completed to Kafka, trigger IVR recording save, and schedule
         room cleanup.
         """
+        logger.debug("Executing SipEventHandler.on_participant_left")
         if not participant_identity.startswith(SIP_PARTICIPANT_PREFIX):
             return
 
@@ -275,6 +248,7 @@ class SipEventHandler:
         Called when a LiveKit room is destroyed.
         Final cleanup of any remaining SIP session state.
         """
+        logger.debug("Executing SipEventHandler.on_room_finished")
         sip_session = sip_session_mgr.get_by_room(room_name)
         if not sip_session:
             return
@@ -299,7 +273,9 @@ class SipEventHandler:
 
 def _start_ringing_timeout(sip_session: SipSession) -> None:
     """Start a watchdog that fails the call if no AI worker joins in time."""
+    logger.debug("Executing _start_ringing_timeout")
     async def _ringing_watchdog():
+        logger.debug("Executing _ringing_watchdog")
         await asyncio.sleep(SIP_RINGING_TIMEOUT_SEC)
         sess = sip_session_mgr.get_by_session(sip_session.session_id)
         if sess and sess.state == SipCallState.RINGING:
@@ -317,7 +293,9 @@ def _start_ringing_timeout(sip_session: SipSession) -> None:
 
 def _start_call_timeout(sip_session: SipSession) -> None:
     """Start max-duration watchdog that force-ends long calls."""
+    logger.debug("Executing _start_call_timeout")
     async def _call_watchdog():
+        logger.debug("Executing _call_watchdog")
         await asyncio.sleep(SIP_CALL_TIMEOUT_SEC)
         sess = sip_session_mgr.get_by_session(sip_session.session_id)
         if sess and sess.state == SipCallState.CONNECTED:
@@ -336,6 +314,7 @@ def _start_call_timeout(sip_session: SipSession) -> None:
 
 def _cancel_timeout(session_id: str) -> None:
     """Cancel any pending timeout task for a session."""
+    logger.debug("Executing _cancel_timeout")
     task = _timeout_tasks.pop(session_id, None)
     if task and not task.done():
         task.cancel()
@@ -364,6 +343,7 @@ async def _publish_sip_call_request(
     Retries on failure with exponential backoff.
     Falls back to direct ai_worker_task spawn if Kafka is unavailable.
     """
+    logger.debug("Executing _publish_sip_call_request")
     from ..kafka.producer import get_producer
     from ..kafka.schemas import CallRequest
 
@@ -432,6 +412,7 @@ async def _fallback_direct_spawn(req) -> None:
     When Kafka is unavailable, spawn ai_worker_task directly.
     Same fallback path as the /livekit/token endpoint.
     """
+    logger.debug("Executing _fallback_direct_spawn")
     try:
         from ..ai_worker import ai_worker_task
         asyncio.ensure_future(
@@ -459,6 +440,7 @@ async def _publish_sip_call_completed(sip_session: SipSession, duration_sec: flo
     Publish a call_completed event for a SIP call that ended.
     Mirrors WorkerService._publish_completed.
     """
+    logger.debug("Executing _publish_sip_call_completed")
     from ..kafka.producer import get_producer
     from ..kafka.schemas import CallCompleted
     from ..kafka.config import TOPIC_CALL_COMPLETED, NODE_ID
@@ -500,6 +482,7 @@ async def _publish_sip_call_failed(sip_session: SipSession, reason: str) -> None
     """
     Publish a call_failed event for a SIP call that could not be established.
     """
+    logger.debug("Executing _publish_sip_call_failed")
     from ..kafka.producer import get_producer
     from ..kafka.schemas import CallFailed
     from ..kafka.config import TOPIC_CALL_FAILED, NODE_ID
@@ -551,6 +534,7 @@ async def _trigger_recording_save(sip_session: SipSession, duration_sec: float) 
     The actual audio recording is handled by the AI worker which joins the
     LiveKit room and captures audio via its existing pipeline.
     """
+    logger.debug("Executing _trigger_recording_save")
     logger.info(
         "[SipRecording] call ended  session=%s  caller=%s  duration=%.0fs",
         sip_session.session_id[:8],
@@ -603,6 +587,7 @@ async def _delayed_room_cleanup(sip_session: SipSession, delay_sec: float = 2.0)
     After a short delay, clean up the LiveKit room for the SIP call.
     The delay allows the AI worker to finish its teardown gracefully.
     """
+    logger.debug("Executing _delayed_room_cleanup")
     await asyncio.sleep(delay_sec)
 
     try:

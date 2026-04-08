@@ -107,6 +107,7 @@ class GpuStats:
 
 # ─────────────────────────────────────────────────────────────────────────────
 def _per_call_memory_mb() -> int:      #Calculate how much GPU memory one call uses
+    logger.debug("Executing _per_call_memory_mb")
     print("[FUNC] Enter: _per_call_memory_mb")
    
     stt_mb = MODEL_MEMORY_MB.get(STT_MODEL, MODEL_MEMORY_MB["whisper_medium"])
@@ -117,6 +118,7 @@ def _per_call_memory_mb() -> int:      #Calculate how much GPU memory one call u
 
 
 def compute_max_calls(gpu_index: int = GPU_INDEX) -> GpuStats:  #Decide how many calls this worker can handle
+    logger.debug("Executing compute_max_calls")
     print("[FUNC] Enter: compute_max_calls")
 
     if not _PYNVML_AVAILABLE or _GPU_HANDLE is None:
@@ -184,6 +186,7 @@ class GpuMonitor:
         partition_index: int = 0,
         poll_interval:   float = WORKER_GPU_POLL_INTERVAL,
     ) -> None:
+        logger.debug("Executing GpuMonitor.__init__")
         print("[FUNC] Enter: __init__")
         self._producer       = producer
         self._partition      = partition_index
@@ -194,6 +197,7 @@ class GpuMonitor:
         print("[FUNC] Exit: __init__")
 
     def start(self, active_calls_ref: "callable") -> None:
+        logger.debug("Executing GpuMonitor.start")
         print("[FUNC] Enter: start")
        
         self._active_calls_ref = active_calls_ref #how many calls are currently running
@@ -202,6 +206,7 @@ class GpuMonitor:
         print("[FUNC] Exit: start")
 
     def stop(self) -> None:
+        logger.debug("Executing GpuMonitor.stop")
         print("[FUNC] Enter: stop")
         self._running = False
         if self._task and not self._task.done():
@@ -209,6 +214,7 @@ class GpuMonitor:
         print("[FUNC] Exit: stop")
 
     async def _loop(self) -> None:
+        logger.debug("Executing GpuMonitor._loop")
         print("[FUNC] Enter: _loop")
         while self._running:
             try:
@@ -221,6 +227,7 @@ class GpuMonitor:
         print("[FUNC] Exit: _loop")
 
     async def _publish_once(self) -> None:
+        logger.debug("Executing GpuMonitor._publish_once")
         print("[FUNC] Enter: _publish_once")
         stats        = compute_max_calls()  #Get GPU stats
         active_calls = self._active_calls_ref()

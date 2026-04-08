@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+.env.local
+
+# Javascript / Node
+node_modules/
+dist/
+.DS_Store
+
+# DB
+*.db
+*.db-shm
+*.db-wal
+
+# Audio/Temporary
+*.wav
+*.mp3
+*.onnx
+piper/
+piper_temp.zip
+test.raw
+test_traces.txt
+test_traces_utf8.txt

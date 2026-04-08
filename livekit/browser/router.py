@@ -1,21 +1,62 @@
-"""
-browser/router.py
-─────────────────────────────────────────────────────────────────────────────
-Browser Call Entry Point — POST /browser/call/start
-
-Changes from original:
-  1. Uses routing singleton (no local RoutingEngine instance)
-  2. caller_id is stored in req.caller_id (NOT caller_number)
-  3. Token identity is unique: browser-{caller_id[:12]}-{uuid6} (no collision)
-  4. Metadata is forwarded to CallRequest
-  5. AI spawn defaults are guaranteed (llm, voice, agent_name)
-  6. All existing features preserved: routing, offline, Kafka, events
-
-Flow:
-  POST /browser/call/start → { token, room_id, session_id, queue_position }
-  Then: lk.connect(LIVEKIT_URL, token)
-  Then: subscribe to /ws/events for real-time updates
-"""
+# [ START: POST /browser/call/start ]
+#       |
+#       v
+# +------------------------------------------+
+# | * browser_call_start(body)               |
+# |   * Generate session_id & room_id        |
+# +------------------------------------------+
+#       |
+#       |----> * CallRequest() (Unified Schema)
+#       |        *  caller_id set
+#       |        *  llm/voice defaults
+#       |        *  Forward metadata
+#       v
+# +------------------------------------------+
+# | 2. Routing Engine (Singleton)            |
+# +------------------------------------------+
+#       |
+#       |----> * get_routing_engine()
+#       |----> * routing_engine.route(req)
+#       |----> * event_hub.publish_routing_decision()
+#       v
+# +------------------------------------------+
+# | 3. Offline / Overload Check              |
+# +------------------------------------------+
+#       |
+#       |----> * offline_handler.check_status()
+#       |           |
+#       |      [ Status: OFFLINE ] --------> * offline_handler.handle()
+#       |           |                        * RETURN: status="fallback"
+#       |           |
+#       |      [ Status: OVERLOADED ] -----> * offline_handler.handle() (Priority Bump)
+#       v
+# +------------------------------------------+
+# | 4. Submit to Kafka                       |
+# +------------------------------------------+
+#       |
+#       |----> * get_producer().submit_call_request()
+#       |           |
+#       |      [ Kafka Success ] ----------> status="queued"
+#       |           |
+#       |      [ Kafka Failed ] -----------> status="direct"
+#       |                                    * _direct_ai_spawn()
+#       v
+# +------------------------------------------+
+# | 5. Finalize Browser Access               |
+# +------------------------------------------+
+#       |
+#       |----> * event_hub.publish("call_queued")
+#       |----> * _issue_token()
+#       |           |
+#       |           * browser-{id}-{uuid} (Unique)
+#       v
+# +------------------------------------------+
+# | RETURN BrowserCallResponse:              |
+# | { session_id, room_id, token,            |
+# |   livekit_url, status, queue_pos }       |
+# +------------------------------------------+
+#       |
+#       [ END ]
 
 import logging
 import time
@@ -35,11 +76,6 @@ from ..websocket import event_hub
 logger = logging.getLogger("callcenter.browser.router")
 
 browser_router = APIRouter(prefix="/browser", tags=["browser"])
-
-# ── FIX #3: No local RoutingEngine() — use the process-wide singleton ──────────
-# _routing_engine is owned by routing/singleton.py; load_routing_rules() is
-# called once at app startup. No duplicate instance here.
-
 
 # ─── Request / Response schemas ───────────────────────────────────────────────
 
@@ -70,15 +106,7 @@ class BrowserCallResponse(BaseModel):
 
 @browser_router.post("/call/start", response_model=BrowserCallResponse)
 async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
-    """
-    Unified browser call entry point.
-
-    Builds a CallRequest identical in structure to a SIP call so the entire
-    downstream pipeline (routing, queue, AI, webhooks) treats both sources the same.
-
-    FIX #1: caller_id stored in req.caller_id (not caller_number — that field is
-    reserved for SIP phone numbers only).
-    """
+ 
     _start = time.perf_counter()
     logger.info(
         "[browser/call/start] START  caller_id=%.16s  lang=%s  priority=%d",
@@ -90,9 +118,7 @@ async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
         room_id    = str(uuid.uuid4())
 
         # ── 1. Build unified CallRequest ────────────────────────────────────────
-        # FIX #1: caller_id goes to req.caller_id, NOT caller_number
-        # FIX #7: metadata forwarded to CallRequest
-        # FIX #6: safe defaults for LLM/voice/agent_name
+    
         req = CallRequest(
             session_id  = session_id,
             room_id     = room_id,
@@ -108,7 +134,7 @@ async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
         )
 
         # ── 2. Routing Engine — singleton, same rules as SIP ────────────────────
-        # FIX #3: Use get_routing_engine() not a local instance
+
         try:
             routing_engine = get_routing_engine()
             decision = await routing_engine.route(req)
@@ -152,7 +178,6 @@ async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
             await offline_handler.handle(req, system_status)  # applies priority bump
 
         # ── 4. Submit to Kafka (or direct AI spawn fallback) ────────────────────
-        # FIX #5: Single method — submit_call_request (standardized)
         producer   = get_producer()
         result     = await producer.submit_call_request(req)
         call_status: str
@@ -179,7 +204,6 @@ async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
         })
 
         # ── 6. Issue LiveKit token ────────────────────────────────────────────────
-        # FIX #4: Unique identity — no collision between concurrent callers
         token = _issue_token(room_id, body.caller_id)
 
         elapsed = time.perf_counter() - _start
@@ -207,10 +231,7 @@ async def browser_call_start(body: BrowserCallRequest) -> BrowserCallResponse:
 
 @browser_router.get("/call/{session_id}/status")
 async def browser_call_status(session_id: str):
-    """
-    Lightweight poll endpoint for browser clients to check call status.
-    Real-time updates come via WebSocket /ws/events.
-    """
+   
     logger.debug("[browser/call/status] session=%.8s", session_id)
     from ..kafka.scheduler import get_cached_lag
     return {
@@ -223,13 +244,7 @@ async def browser_call_status(session_id: str):
 # ─── Private helpers ──────────────────────────────────────────────────────────
 
 def _issue_token(room_id: str, caller_id: str) -> str:
-    """
-    Generate a LiveKit participant token for the browser caller.
-
-    FIX #4: Identity includes a short UUID suffix to guarantee uniqueness
-    even when the same caller_id reconnects multiple times concurrently.
-    """
-    # Truncate to 12 chars + 6-char unique suffix → never collides
+   
     identity = f"browser-{caller_id[:12]}-{uuid.uuid4().hex[:6]}"
     try:
         return generate_token(
@@ -245,12 +260,7 @@ def _issue_token(room_id: str, caller_id: str) -> str:
 
 
 async def _direct_ai_spawn(req: CallRequest) -> None:
-    """
-    Direct AI worker spawn when Kafka is unavailable (same as SIP fallback).
-
-    FIX #6: Guaranteed defaults applied before spawning to avoid crashes on
-    missing fields.
-    """
+   
     # Safe defaults — never pass empty strings that crash ai_worker_task
     llm        = req.llm        or "gemini"
     voice      = req.voice      or ""

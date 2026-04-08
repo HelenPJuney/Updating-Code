@@ -12,6 +12,9 @@ Usage:
     await event_hub.publish({"type": "call_started", "session_id": "..."})
 """
 
+import logging
+logger = logging.getLogger(__name__)
+
 from .hub import EventHub
 from .api import ws_router
 

@@ -155,6 +155,7 @@ class WorkerService:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing WorkerService.__init__")
         self._consumer: Optional[AIOKafkaConsumer] = None
         self._producer: Optional[AIOKafkaProducer] = None
 
@@ -175,6 +176,7 @@ class WorkerService:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        logger.debug("Executing WorkerService.start")
         if not _AIOKAFKA_AVAILABLE:
             raise RuntimeError("aiokafka is not installed")
 
@@ -232,6 +234,7 @@ class WorkerService:
         )
 
     async def stop(self) -> None:
+        logger.debug("Executing WorkerService.stop")
         self._shutting_down = True
         self._running       = False
 
@@ -283,6 +286,7 @@ class WorkerService:
     # ── Main run ──────────────────────────────────────────────────────────────
 
     async def run(self) -> None:
+        logger.debug("Executing WorkerService.run")
         await self.start()
 
         # Start GPU monitor and heartbeat in background
@@ -305,6 +309,7 @@ class WorkerService:
             msg.key == NODE_ID.encode()
         This is a second layer of safety on top of partition isolation.
         """
+        logger.debug("Executing WorkerService._consume_calls")
         async for msg in self._consumer:
             if not self._running:
                 break
@@ -366,6 +371,7 @@ class WorkerService:
 
     async def _run_worker_with_lifecycle(self, req: CallRequest) -> None:
       
+        logger.debug("Executing WorkerService._run_worker_with_lifecycle")
         if not _AI_WORKER_AVAILABLE:
             logger.error(
                 "[WorkerSvc] ai_worker_task unavailable — rejecting session=%s",
@@ -451,6 +457,7 @@ class WorkerService:
     # ── Event publishers ──────────────────────────────────────────────────────
 
     async def _publish_started(self, req: CallRequest) -> None:
+        logger.debug("Executing WorkerService._publish_started")
         evt = CallStarted(
             session_id = req.session_id,
             room_id    = req.room_id,
@@ -463,6 +470,7 @@ class WorkerService:
         )
 
     async def _publish_completed(self, req: CallRequest, duration: float) -> None:
+        logger.debug("Executing WorkerService._publish_completed")
         evt = CallCompleted(
             session_id   = req.session_id,
             room_id      = req.room_id,
@@ -477,6 +485,7 @@ class WorkerService:
         error: str,
         retry_count: int = 0,
     ) -> None:
+        logger.debug("Executing WorkerService._publish_failed")
         evt = CallFailed(
             session_id  = req.session_id,
             room_id     = req.room_id,
@@ -488,6 +497,7 @@ class WorkerService:
 
     async def _publish_dlq(self, req: CallRequest, error: str) -> None:
         """FIX 6: Publish failed call to dead-letter queue for manual inspection."""
+        logger.debug("Executing WorkerService._publish_dlq")
         import json as _json
         payload = _json.dumps({
             "session_id":  req.session_id,
@@ -508,6 +518,7 @@ class WorkerService:
         )
 
     async def _publish(self, topic: str, key: str, value: str) -> None:
+        logger.debug("Executing WorkerService._publish")
         if not self._producer:
             return
         try:
@@ -526,6 +537,7 @@ class WorkerService:
         Publish WorkerHeartbeat to worker_heartbeat topic every WORKER_HEARTBEAT_INTERVAL s.
         The Scheduler uses this as a dead-man's switch to detect node failures.
         """
+        logger.debug("Executing WorkerService._heartbeat_loop")
         while self._running:
             try:
                 hb = WorkerHeartbeat(
@@ -549,6 +561,7 @@ class WorkerService:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _main() -> None:
+    logger.debug("Executing _main")
     logging.basicConfig(
         level  = logging.INFO,
         format = "%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -559,6 +572,7 @@ async def _main() -> None:
     loop = asyncio.get_running_loop()
 
     def _handle_sigterm(*_):
+        logger.debug("Executing _handle_sigterm")
         logger.info("[WorkerSvc] SIGTERM received — graceful shutdown")
         service._shutting_down = True
         service._running       = False

@@ -82,6 +82,7 @@ class QueueNotifier:
     """
 
     def __init__(self, livekit_url: str, api_key: str, api_secret: str) -> None:
+        logger.debug("Executing QueueNotifier.__init__")
         self._url    = livekit_url
         self._key    = api_key
         self._secret = api_secret
@@ -90,6 +91,7 @@ class QueueNotifier:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        logger.debug("Executing QueueNotifier.start")
         if not _LIVEKIT_API_AVAILABLE:
             return
         try:
@@ -100,6 +102,7 @@ class QueueNotifier:
             self._api = None
 
     async def stop(self) -> None:
+        logger.debug("Executing QueueNotifier.stop")
         if self._api:
             try:
                 await self._api.aclose()
@@ -118,6 +121,7 @@ class QueueNotifier:
         queue_items — ordered list (head = position 1) of waiting CallRequests.
         Called by the Scheduler after every enqueue or dequeue operation.
         """
+        logger.debug("Executing QueueNotifier.broadcast_queue_positions")
         if not queue_items:
             return
 
@@ -145,6 +149,7 @@ class QueueNotifier:
         Tell the browser the AI worker is about to join — transition from
         waiting screen to call screen.
         """
+        logger.debug("Executing QueueNotifier.notify_call_starting")
         msg = CallStart()
         await self._send_to_room(
             room_id     = req.room_id,
@@ -164,6 +169,7 @@ class QueueNotifier:
         participant: str,
         payload:     bytes,
     ) -> None:
+        logger.debug("Executing QueueNotifier._send_to_room")
         if self._api is None:
             logger.debug("[Notifier] skipping DataChannel send (no API client)")
             return

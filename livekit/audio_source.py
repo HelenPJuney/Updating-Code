@@ -69,7 +69,7 @@ from typing import Optional
 
 import numpy as np
 
-from backend.webrtc.utils import wav_bytes_to_pcm, resample_audio, float32_to_int16
+from .webrtc.utils import wav_bytes_to_pcm, resample_audio, float32_to_int16
 
 logger = logging.getLogger("callcenter.livekit.audio_source")
 
@@ -81,6 +81,7 @@ _MAX_QUEUE     = 500          # ≈ 10 s of buffered audio
 class TtsAudioSource:
 
     def __init__(self) -> None:
+        logger.debug("Executing TtsAudioSource.__init__")
         from livekit import rtc
         # The LiveKit audio source that the published track reads from
         self.source: "rtc.AudioSource" = rtc.AudioSource(
@@ -98,6 +99,7 @@ class TtsAudioSource:
     # --------------------------------------------------
     def start(self) -> None:
         """Start the background pump. Call once after the room is connected."""
+        logger.debug("Executing TtsAudioSource.start")
         if self._task is None or self._task.done():
             self._task = asyncio.ensure_future(self._pump())
 
@@ -106,6 +108,7 @@ class TtsAudioSource:
     # --------------------------------------------------
     def stop(self) -> None:
         """Stop the pump coroutine on session close."""
+        logger.debug("Executing TtsAudioSource.stop")
         self._closed = True
         if self._task and not self._task.done():
             self._task.cancel()
@@ -114,6 +117,7 @@ class TtsAudioSource:
 
     async def _pump(self) -> None:
   
+        logger.debug("Executing TtsAudioSource._pump")
         from livekit import rtc
 
         while not self._closed:
@@ -145,6 +149,7 @@ class TtsAudioSource:
 
     async def push_tts_wav(self, wav_bytes: bytes) -> None:
      
+        logger.debug("Executing TtsAudioSource.push_tts_wav")
         try:
             pcm_f32, native_sr = wav_bytes_to_pcm(wav_bytes)
         except Exception:
@@ -179,6 +184,7 @@ class TtsAudioSource:
 
     def clear(self) -> int:
       
+        logger.debug("Executing TtsAudioSource.clear")
         drained = 0
         while True:
             try:

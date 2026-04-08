@@ -1,25 +1,30 @@
-"""
-websocket/hub.py
-────────────────────────────────────────────────────────────────────────────────
-Central asyncio event hub — fan-out broadcast to all subscribed clients.
-
-Design:
-  • Each connected WebSocket/SSE client gets an asyncio.Queue (max 200 items).
-  • publish() puts a copy of the event dict into every subscriber queue.
-  • Slow/disconnected clients: if a queue is full, the oldest event is dropped
-    (non-blocking — never stalls the publisher).
-  • No external dependencies (pure asyncio).
-
-Event envelope:
-  {
-    "type":      str,   # call_started | call_completed | call_failed |
-                        # queue_update | agent_state | routing_decision |
-                        # scheduled_job | system_status | sip_event
-    "ts":        float, # UTC epoch
-    "session_id": str | null,
-    ...                 # event-specific payload
-  }
-"""
+# [ START: EVENT PUBLICATION ]
+#       |
+#       v
+# +------------------------------------------+
+# | EventHub.publish(event)                  |
+# | * Stamp 'ts' (timestamp) if missing      |
+# | * Acquire asyncio.Lock                   |
+# +------------------------------------------+
+#       |
+#       |----> [ History Management ]
+#       |      * Append to _history (Deque)
+#       |      * Maintain _HISTORY_SIZE (100)
+#       |
+#       | [ Fan-Out Loop ]
+#       v
+# +------------------------------------------+
+# | For every Queue in _subscribers:         |
+# | * Attempt q.put_nowait(event)            |
+# +------------------------------------------+
+#       |
+#       | (If Queue is Full)
+#       |----> [ Drop Oldest (Ring Buffer) ]
+#       |      * q.get_nowait()
+#       |      * q.put_nowait(event)
+#       |      * Increment _total_dropped
+#       v
+# [ END: BROADCAST COMPLETE ]
 
 import asyncio
 import logging
@@ -41,6 +46,7 @@ class EventHub:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing EventHub.__init__")
         self._subscribers: Set[asyncio.Queue] = set()
         self._history: Deque[Dict] = deque(maxlen=_HISTORY_SIZE)
         self._lock = asyncio.Lock()
@@ -54,6 +60,7 @@ class EventHub:
         Create and register a new subscriber queue.
         If replay_history=True, pre-fill the queue with recent events.
         """
+        logger.debug("Executing EventHub.subscribe")
         q: asyncio.Queue = asyncio.Queue(maxsize=_MAX_QUEUE_SIZE)
         async with self._lock:
             if replay_history:
@@ -66,6 +73,7 @@ class EventHub:
         return q
 
     async def unsubscribe(self, q: asyncio.Queue) -> None:
+        logger.debug("Executing EventHub.unsubscribe")
         async with self._lock:
             self._subscribers.discard(q)
 
@@ -76,6 +84,7 @@ class EventHub:
         Broadcast an event to all subscribers.
         Automatically stamps event with 'ts' if missing.
         """
+        logger.debug("Executing EventHub.publish")
         if "ts" not in event:
             event = {**event, "ts": time.time()}
 
@@ -100,6 +109,7 @@ class EventHub:
     # Synchronous publish helper — safe to call from sync context
     def publish_sync(self, event: Dict[str, Any], loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
         """Fire-and-forget publish from synchronous code."""
+        logger.debug("Executing EventHub.publish_sync")
         try:
             lp = loop or asyncio.get_event_loop()
             if lp.is_running():
@@ -110,6 +120,7 @@ class EventHub:
     # ── Convenience helpers ───────────────────────────────────────────────────
 
     async def publish_call_started(self, session_id: str, room_id: str, node_id: str, source: str = "browser") -> None:
+        logger.debug("Executing EventHub.publish_call_started")
         await self.publish({
             "type": "call_started",
             "session_id": session_id,
@@ -119,6 +130,7 @@ class EventHub:
         })
 
     async def publish_call_completed(self, session_id: str, duration_sec: float, node_id: str) -> None:
+        logger.debug("Executing EventHub.publish_call_completed")
         await self.publish({
             "type": "call_completed",
             "session_id": session_id,
@@ -127,6 +139,7 @@ class EventHub:
         })
 
     async def publish_call_failed(self, session_id: str, error: str, retry_count: int = 0) -> None:
+        logger.debug("Executing EventHub.publish_call_failed")
         await self.publish({
             "type": "call_failed",
             "session_id": session_id,
@@ -135,6 +148,7 @@ class EventHub:
         })
 
     async def publish_queue_update(self, queue_depth: int, active_nodes: int) -> None:
+        logger.debug("Executing EventHub.publish_queue_update")
         await self.publish({
             "type": "queue_update",
             "queue_depth": queue_depth,
@@ -142,6 +156,7 @@ class EventHub:
         })
 
     async def publish_routing_decision(self, session_id: str, rule_name: str, queue_name: str) -> None:
+        logger.debug("Executing EventHub.publish_routing_decision")
         await self.publish({
             "type": "routing_decision",
             "session_id": session_id,
@@ -150,6 +165,7 @@ class EventHub:
         })
 
     async def publish_escalation(self, session_id: str, reason: str, agent_id: Optional[str] = None) -> None:
+        logger.debug("Executing EventHub.publish_escalation")
         await self.publish({
             "type": "escalation",
             "session_id": session_id,
@@ -158,6 +174,7 @@ class EventHub:
         })
 
     async def publish_scheduled_job(self, job_id: str, status: str, phone_number: str) -> None:
+        logger.debug("Executing EventHub.publish_scheduled_job")
         await self.publish({
             "type": "scheduled_job",
             "job_id": job_id,
@@ -166,6 +183,7 @@ class EventHub:
         })
 
     async def publish_system_status(self, online: bool, active_nodes: int, queue_depth: int) -> None:
+        logger.debug("Executing EventHub.publish_system_status")
         await self.publish({
             "type": "system_status",
             "online": online,
@@ -177,9 +195,11 @@ class EventHub:
 
     @property
     def subscriber_count(self) -> int:
+        logger.debug("Executing EventHub.subscriber_count")
         return len(self._subscribers)
 
     def stats(self) -> Dict:
+        logger.debug("Executing EventHub.stats")
         return {
             "subscribers":       self.subscriber_count,
             "total_published":   self._total_published,

@@ -11,6 +11,9 @@ Usage:
     job_id = await scheduling_service.schedule(ScheduledCallJob(...))
 """
 
+import logging
+logger = logging.getLogger(__name__)
+
 from .models import ScheduledCallJob, JobStatus
 from .service import ScheduledCallService
 from .api import scheduling_router

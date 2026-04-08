@@ -97,6 +97,7 @@ class RoutingTestRequest(BaseModel):
 @routing_router.get("/rules")
 async def list_rules():
     """List all routing rules in evaluation order."""
+    logger.debug("Executing list_rules")
     from . import routing_engine
     return {
         "rules": routing_engine.rules_snapshot(),
@@ -108,6 +109,7 @@ async def list_rules():
 @routing_router.post("/rules/reload")
 async def reload_rules():
     """Hot-reload routing rules from disk without restarting."""
+    logger.debug("Executing reload_rules")
     from . import routing_engine
     count = routing_engine.reload_rules()
     logger.info("[RoutingAPI] rules reloaded: %d rules", count)
@@ -117,6 +119,7 @@ async def reload_rules():
 @routing_router.get("/agents")
 async def list_agents():
     """List all registered human agents and their availability."""
+    logger.debug("Executing list_agents")
     from . import routing_engine
     return {
         "agents": routing_engine.agents_snapshot(),
@@ -127,6 +130,7 @@ async def list_agents():
 @routing_router.post("/agents")
 async def register_agent(req: AgentRegisterRequest):
     """Register or update a human agent in the routing pool."""
+    logger.debug("Executing register_agent")
     from . import routing_engine
     from .engine import AgentInfo
 
@@ -151,6 +155,7 @@ async def register_agent(req: AgentRegisterRequest):
 @routing_router.delete("/agents/{agent_id}")
 async def deregister_agent(agent_id: str):
     """Remove a human agent from the routing pool."""
+    logger.debug("Executing deregister_agent")
     from . import routing_engine
     await routing_engine.deregister_agent(agent_id)
     return {"status": "deregistered", "agent_id": agent_id}
@@ -159,6 +164,7 @@ async def deregister_agent(agent_id: str):
 @routing_router.post("/agents/{agent_id}/heartbeat")
 async def agent_heartbeat(agent_id: str):
     """Keep an agent alive (call every 30s)."""
+    logger.debug("Executing agent_heartbeat")
     from . import routing_engine
     await routing_engine.agent_heartbeat(agent_id)
     return {"status": "ok", "agent_id": agent_id, "timestamp": time.time()}
@@ -167,6 +173,7 @@ async def agent_heartbeat(agent_id: str):
 @routing_router.post("/agents/{agent_id}/release")
 async def release_agent_slot(agent_id: str):
     """Free one call slot for an agent after a call ends."""
+    logger.debug("Executing release_agent_slot")
     from . import routing_engine
     await routing_engine.release_agent(agent_id)
     return {"status": "released", "agent_id": agent_id}
@@ -178,6 +185,7 @@ async def test_routing_decision(req: RoutingTestRequest):
     Dry-run routing decision for given call parameters.
     Does NOT book any agent — use for testing rule logic.
     """
+    logger.debug("Executing test_routing_decision")
     from . import routing_engine
     from ..kafka.schemas import CallRequest
 

@@ -96,11 +96,13 @@ class JobStore:
     """
 
     def __init__(self, db_path: Optional[str] = None) -> None:
+        logger.debug("Executing JobStore.__init__")
         self._path = db_path or _DEFAULT_DB_PATH
         self._conn: Optional[sqlite3.Connection] = None
 
     def open(self) -> None:
         """Open the database and create schema if needed."""
+        logger.debug("Executing JobStore.open")
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         # WAL mode: readers don't block writers
@@ -110,6 +112,7 @@ class JobStore:
         logger.info("[JobStore] opened db at %s", self._path)
 
     def close(self) -> None:
+        logger.debug("Executing JobStore.close")
         if self._conn:
             self._conn.close()
             self._conn = None
@@ -118,6 +121,7 @@ class JobStore:
 
     def upsert(self, job: ScheduledCallJob) -> None:
         """Insert or replace a job."""
+        logger.debug("Executing JobStore.upsert")
         assert self._conn, "store not opened"
         data = json.dumps(job.to_dict())
         self._conn.execute(
@@ -138,6 +142,7 @@ class JobStore:
         self._conn.commit()
 
     def get(self, job_id: str) -> Optional[ScheduledCallJob]:
+        logger.debug("Executing JobStore.get")
         assert self._conn
         row = self._conn.execute(
             "SELECT data FROM scheduled_jobs WHERE job_id = ?", (job_id,)
@@ -147,6 +152,7 @@ class JobStore:
         return None
 
     def delete(self, job_id: str) -> bool:
+        logger.debug("Executing JobStore.delete")
         assert self._conn
         cur = self._conn.execute(
             "DELETE FROM scheduled_jobs WHERE job_id = ?", (job_id,)
@@ -156,6 +162,7 @@ class JobStore:
 
     def list_due(self, now: Optional[float] = None) -> List[ScheduledCallJob]:
         """Return all pending jobs whose scheduled_at <= now."""
+        logger.debug("Executing JobStore.list_due")
         assert self._conn
         rows = self._conn.execute(
             "SELECT data FROM scheduled_jobs WHERE status = 'pending' AND scheduled_at <= ?",
@@ -169,6 +176,7 @@ class JobStore:
         limit: int = 100,
         offset: int = 0,
     ) -> List[ScheduledCallJob]:
+        logger.debug("Executing JobStore.list_all")
         assert self._conn
         if status:
             rows = self._conn.execute(
@@ -191,6 +199,7 @@ class JobStore:
         error: str = "",
         executed_at: Optional[float] = None,
     ) -> None:
+        logger.debug("Executing JobStore.update_status")
         assert self._conn
         job = self.get(job_id)
         if not job:
@@ -203,6 +212,7 @@ class JobStore:
         self.upsert(job)
 
     def count_by_status(self) -> dict:
+        logger.debug("Executing JobStore.count_by_status")
         assert self._conn
         rows = self._conn.execute(
             "SELECT status, COUNT(*) as cnt FROM scheduled_jobs GROUP BY status"

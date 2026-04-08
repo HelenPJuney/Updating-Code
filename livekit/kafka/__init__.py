@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 print("[FILE] Entering:Kafka __init__.py")
 from .producer import CallRequestProducer, get_producer   # noqa: F401

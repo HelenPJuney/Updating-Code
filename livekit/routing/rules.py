@@ -68,6 +68,7 @@ class RuleLoader:
    
 
     def __init__(self, path: Optional[Path] = None) -> None:
+        logger.debug("Executing RuleLoader.__init__")
         env_path = os.getenv("ROUTING_RULES_PATH")
         self._path: Path = Path(env_path) if env_path else (path or _DEFAULT_RULES_PATH)
         self._rules: List[RoutingRule] = []
@@ -75,6 +76,7 @@ class RuleLoader:
 
     def load(self) -> None:
         """Load rules from disk. Call at startup and on hot-reload."""
+        logger.debug("Executing RuleLoader.load")
         try:
             with open(self._path, encoding="utf-8") as fh:
                 raw = json.load(fh)
@@ -92,6 +94,7 @@ class RuleLoader:
             # Keep old rules on reload failure
 
     def _parse_rule(self, raw: Dict) -> RoutingRule:
+        logger.debug("Executing RuleLoader._parse_rule")
         cond_raw = raw.get("conditions", {})
         tgt_raw  = raw.get("target", {})
         cond = RuleConditions(
@@ -120,14 +123,17 @@ class RuleLoader:
 
     @property
     def rules(self) -> List[RoutingRule]:
+        logger.debug("Executing RuleLoader.rules")
         return self._rules
 
     @property
     def raw(self) -> Dict:
+        logger.debug("Executing RuleLoader.raw")
         return self._raw
 
     def to_dict_list(self) -> List[Dict]:
         """Serialize rules for the /routing/rules API response."""
+        logger.debug("Executing RuleLoader.to_dict_list")
         out = []
         for r in self._rules:
             out.append({

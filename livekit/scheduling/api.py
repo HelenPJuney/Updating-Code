@@ -1,79 +1,50 @@
-# [ START ]
-#     |
-#     v
-# +-----------------------------+
-# | _parse_epoch(dt_str)        |
-# | * Validate the datetime  |
-# +-----------------------------+
-#     |
-#     |
-#     v
-# +-----------------------------+
-# | POST /jobs                  |
-# | (schedule_job)              |
-# +-----------------------------+
-#     |
-#     | [ 1. Validation ]
-#     |----> Call _parse_epoch()
-#     |----> CHECK: Is date in the future? (Fail if past)
-#     |
-#     | [ 2. Creation ]
-#     |----> Map request to ScheduledCallJob model
-#     |----> await scheduling_service.schedule(job)
-#     |
-#     | [ 3. Response ]
-#     |----> RETURN: 201 Created + Job details
-#     v
-# +-----------------------------+
-# | GET /jobs                   |
-# | (list_jobs)                 |
-# +-----------------------------+
-#     |
-#     | [ 1. Fetching ]
-#     |----> Apply Query params (status, limit, offset)
-#     |----> await scheduling_service.list_jobs()
-#     |
-#     | [ 2. Serialization ]
-#     |----> Convert job objects to Dicts via .to_dict()
-#     |----> RETURN: List of jobs + metadata
-#     v
-# +-----------------------------+
-# | GET /jobs/{job_id}          |
-# | (get_job)                   |
-# +-----------------------------+
-#     |
-#     | [ 1. Lookup ]
-#     |----> await scheduling_service.get_job(id)
-#     |----> IF NOT FOUND: Raise 404
-#     |
-#     | [ 2. Response ]
-#     |----> RETURN: Single job details
-#     v
-# +-----------------------------+
-# | DELETE /jobs/{job_id}       |
-# | (cancel_job)                |
-# +-----------------------------+
-#     |
-#     | [ 1. Removal ]
-#     |----> await scheduling_service.cancel(id)
-#     |----> IF FAIL: Raise 404 (Not found/Not pending)
-#     |
-#     | [ 2. Response ]
-#     |----> RETURN: "status": "cancelled"
-#     v
-# +-----------------------------+
-# | GET /stats                  |
-# | (scheduling_stats)          |
-# +-----------------------------+
-#     |
-#     | [ 1. Aggregation ]
-#     |----> await scheduling_service.stats()
-#     |
-#     | [ 2. Response ]
-#     |----> RETURN: Counts by status + timestamp
-#     v
-# [ YIELD ]
+# [ START: SCHEDULING API CLIENT ]
+#       |
+#       |--- (A) POST /jobs (Schedule)
+#       |--- (B) GET  /jobs (List/Filter)
+#       |--- (C) GET  /jobs/{job_id} (Detail)
+#       |--- (D) DELETE /jobs/{job_id} (Cancel)
+#       v
+# +------------------------------------------+
+# | scheduling_router -> Endpoint Methods    |
+# | * Validate Request (Pydantic/ISO-8601)   |
+# +------------------------------------------+
+#       |
+#       | (If /jobs POST)
+#       |----> _parse_epoch(scheduled_at)
+#       |      * Convert ISO/Unix to UTC float
+#       |      * Check: Is date in future?
+#       |
+#       |----> [ scheduling_service ]
+#       |      |
+#       |      |-- schedule(ScheduledCallJob)
+#       |      |   * Persist and queue job
+#       |      |
+#       |      |-- list_jobs(status, limit)
+#       |      |   * Fetch job collection
+#       |      |
+#       |      |-- get_job(job_id)
+#       |      |   * Fetch single job
+#       |      |
+#       |      |-- cancel(job_id)
+#       |      |   * Stop/Remove pending job
+#       |      |
+#       |      `-- stats()
+#       |          * Aggregated job counts
+#       |
+#       | (If Success)              (If Error)
+#       v                           v
+# +-----------------------+   +-----------------------+
+# | Build JSON Response   |   | Log Error             |
+# | (Status: scheduled)   |   | Raise 404/422 Error   |
+# +-----------------------+   +-----------------------+
+#       |
+#       v
+# [ RETURN API RESPONSE ]
 
+
+import logging
+logger = logging.getLogger(__name__)
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -105,6 +76,7 @@ class ScheduleCallRequest(BaseModel):
     @classmethod
     def parse_scheduled_at(cls, v: str) -> str:
         """Validate the datetime string is parseable (returned unchanged)."""
+        logger.debug("Executing ScheduleCallRequest.parse_scheduled_at")
         try:
             float(v)   # try as unix timestamp
         except ValueError:
@@ -114,6 +86,7 @@ class ScheduleCallRequest(BaseModel):
 
 def _parse_epoch(dt_str: str) -> float:
     """Convert ISO-8601 or unix-timestamp string to UTC epoch float."""
+    logger.debug("Executing _parse_epoch")
     try:
         return float(dt_str)
     except ValueError:
@@ -134,6 +107,7 @@ def _parse_epoch(dt_str: str) -> float:
 @scheduling_router.post("/jobs", status_code=201)
 async def schedule_job(req: ScheduleCallRequest):
     """Schedule an outbound call for a future time."""
+    logger.debug("Executing schedule_job")
     from . import scheduling_service
     from .models import ScheduledCallJob
 
@@ -182,6 +156,7 @@ async def list_jobs(
     offset: int = Query(0, ge=0),
 ):
     """List scheduled jobs, optionally filtered by status."""
+    logger.debug("Executing list_jobs")
     from . import scheduling_service
 
     jobs = await scheduling_service.list_jobs(status=status, limit=limit, offset=offset)
@@ -196,6 +171,7 @@ async def list_jobs(
 @scheduling_router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     """Get a specific scheduled job by ID."""
+    logger.debug("Executing get_job")
     from . import scheduling_service
 
     job = await scheduling_service.get_job(job_id)
@@ -207,6 +183,7 @@ async def get_job(job_id: str):
 @scheduling_router.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str):
     """Cancel a pending scheduled job."""
+    logger.debug("Executing cancel_job")
     from . import scheduling_service
 
     ok = await scheduling_service.cancel(job_id)
@@ -221,6 +198,7 @@ async def cancel_job(job_id: str):
 @scheduling_router.get("/stats")
 async def scheduling_stats():
     """Get job counts by status."""
+    logger.debug("Executing scheduling_stats")
     from . import scheduling_service
     stats = await scheduling_service.stats()
     return {**stats, "timestamp": time.time()}

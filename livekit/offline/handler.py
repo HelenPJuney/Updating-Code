@@ -1,63 +1,45 @@
-# [ START ]
-#     |
-#     v
-# +------------------------+
-# | check_status()         |
-# | * Cache check (5s)     |
-# | * Calls _evaluate()    |
-# +------------------------+
-#     |
-#     |----> _evaluate()
-#     |        |
-#     |        ----> Reads Scheduler node registry
-#     |        ----> Calculates ONLINE | OVERLOADED | OFFLINE
-#     v
-# +------------------------+
-# | handle(req)            |
-# | * Main entry point     |
-# | * Routes by status     |
-# +------------------------+
-#     |
-#     |----> ONLINE: Return "none" action
-#     |
-#     |----> OVERLOADED: 
-#     |        |
-#     |        ----> Apply _OVERLOAD_PRIORITY to req
-#     |        ----> Return "queue" action
-#     |
-#     |----> OFFLINE:
-#     |        |
-#     |        ----> _apply_fallback(req, action)
-#     v
-# +------------------------+
-# | _apply_fallback()      |
-# | * Execute logic based  |
-# |   on config/request    |
-# +------------------------+
-#     |
-#     |----> _handle_voicemail()
-#     |        |
-#     |        ----> _notify_browser() (DataChannel)
-#     |
-#     |----> _handle_callback()
-#     |        |
-#     |        ----> scheduling_service.schedule()
-#     |        ----> _notify_browser()
-#     |
-#     |----> _handle_ai_bot()
-#     |        |
-#     |        ----> ai_worker_task() (Bypass Kafka)
-#     |
-#     |----> DEFAULT: "queue" action
-#     v
-# +------------------------+
-# | get_node_summary()     |
-# | * Health API helper    |
-# | * Returns node list    |
-# +------------------------+
-#     |
-#     v
-# [ YIELD ]
+# [ START: AVAILABILITY CHECK ]
+#       |
+#       v
+# +------------------------------------------+
+# | OfflineHandler -> check_status()         |
+# | * Return cached status (5s window)       |
+# | * Else, trigger _evaluate()              |
+# +------------------------------------------+
+#       |
+#       |----> _evaluate()
+#       |      * Read Scheduler node registry
+#       |      * Count "alive" nodes (heartbeat)
+#       |      * Check total_free slots
+#       v
+# [ STATUS: ONLINE | OVERLOADED | OFFLINE ]
+#       |
+#       v
+# +------------------------------------------+
+# | OfflineHandler -> handle(req, status)    |
+# | * ONLINE:     Route normally             |
+# | * OVERLOADED: Apply priority_bump        |
+# | * OFFLINE:    Trigger _apply_fallback()  |
+# +------------------------------------------+
+#       |
+#       |----> _apply_fallback()
+#       |      |
+#       |      |-- _handle_voicemail()
+#       |      |   * Notify via _notify_browser
+#       |      |
+#       |      |-- _handle_callback()
+#       |      |   * Schedule via scheduling_service
+#       |      |
+#       |      `-- _handle_ai_bot()
+#       |          * Direct spawn ai_worker_task
+#       v
+# +------------------------------------------+
+# | _notify_browser()                        |
+# | * Send DataChannel msg via LiveKitAPI    |
+# +------------------------------------------+
+#       |
+#       v
+# [ RETURN FallbackResult ]
 
 import asyncio
 import logging
@@ -99,6 +81,7 @@ class OfflineHandler:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing OfflineHandler.__init__")
         self._last_check:  float = 0.0
         self._last_status: OfflineStatus = OfflineStatus.ONLINE
         self._check_interval: float = 5.0   # re-evaluate every 5 s
@@ -107,6 +90,7 @@ class OfflineHandler:
 
     async def check_status(self) -> OfflineStatus:
         """Return current system availability status (cached 5 s)."""
+        logger.debug("Executing OfflineHandler.check_status")
         now = time.time()
         if now - self._last_check < self._check_interval:
             return self._last_status
@@ -127,6 +111,7 @@ class OfflineHandler:
         req: CallRequest (mutated in-place if priority bump applied)
         Returns FallbackResult describing the action taken.
         """
+        logger.debug("Executing OfflineHandler.handle")
         if status is None:
             status = await self.check_status()
 
@@ -160,6 +145,7 @@ class OfflineHandler:
         Read the in-process Scheduler's node registry if available.
         Falls back to checking the Kafka producer connectivity.
         """
+        logger.debug("Executing OfflineHandler._evaluate")
         try:
             from ..kafka.scheduler import _scheduler_instance
             if _scheduler_instance is None:
@@ -195,6 +181,7 @@ class OfflineHandler:
     async def _apply_fallback(self, req, action: str) -> FallbackResult:
         """Apply a specific fallback action to a call request."""
 
+        logger.debug("Executing OfflineHandler._apply_fallback")
         if action == "voicemail":
             return await self._handle_voicemail(req)
         elif action == "callback":
@@ -216,6 +203,7 @@ class OfflineHandler:
         as handled.  The actual voicemail recording should be triggered by
         the caller's telephony provider.
         """
+        logger.debug("Executing OfflineHandler._handle_voicemail")
         logger.info(
             "[Offline] voicemail fallback  session=%s",
             getattr(req, "session_id", "?")[:8],
@@ -240,6 +228,7 @@ class OfflineHandler:
         """
         Schedule a callback call for 5 minutes from now using ScheduledCallService.
         """
+        logger.debug("Executing OfflineHandler._handle_callback")
         job_id: Optional[str] = None
         try:
             from ..scheduling import scheduling_service
@@ -288,6 +277,7 @@ class OfflineHandler:
         call even when all GPU nodes are unavailable via the Scheduler.
         This is the existing fallback path — we just trigger it explicitly.
         """
+        logger.debug("Executing OfflineHandler._handle_ai_bot")
         try:
             from ..ai_worker import ai_worker_task
             asyncio.ensure_future(
@@ -324,6 +314,7 @@ class OfflineHandler:
 
     async def _notify_browser(self, req, message: dict) -> None:
         """Send a DataChannel message to the browser via LiveKit Server SDK."""
+        logger.debug("Executing OfflineHandler._notify_browser")
         try:
             from livekit.api import LiveKitAPI, SendDataRequest
             from ..token_service import LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
@@ -346,6 +337,7 @@ class OfflineHandler:
 
     def get_node_summary(self) -> List[Dict]:
         """Return a summary of known nodes for the health API."""
+        logger.debug("Executing OfflineHandler.get_node_summary")
         try:
             from ..kafka.scheduler import _scheduler_instance
             if not _scheduler_instance:

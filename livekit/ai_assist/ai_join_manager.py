@@ -1,79 +1,38 @@
-# [ START: EXTERNAL TRIGGER ]
+# [ START: AI JOIN REQUEST ]
 #       |
-#       |--- (A) POST /ai/join (Manual)
-#       |--- (B) Webhook: PARTICIPANT_JOINED (Auto)
 #       v
 # +------------------------------------------+
-# | ai_assist_router -> ai_join() / webhook()|
-# | * Extract: room_id, mode, lang           |
+# | AIJoinManager -> join_room()             |
+# | * Debounce and session lock check        |
 # +------------------------------------------+
 #       |
-#       |----> ai_join_manager -> join_room()
-#       |           |
-#       |           v
-#       |     +----------------------------------+
-#       |     | Check self.active_sessions       |
-#       |     | (Uses self._lock)                |
-#       |     +----------------------------------+
-#       |           |
-#       |           |----> asyncio.create_task()
-#       v           v
-# [ RETURN 200 OK ]   [ BACKGROUND: _ai_assist_task() ]
-# (API response)            |
-#                           v
-#             +----------------------------------+
-#             | 1. generate_token()              |
-#             | 2. Register Event Listeners      |
-#             | 3. session.room.connect()        |
-#             | 4. Publish AI Audio Track        |
-#             +----------------------------------+
-#                           |
-#                           |----> Event: on("track_subscribed")
-#                           v
-#             +----------------------------------+
-#             | _inbound_loop()                  |
-#             | * Create rtc.AudioStream()       |
-#             +----------------------------------+
-#                           |
-#                     [ AUDIO LOOP ]
-#                           |
-#             +----------------------------------+
-#             | 1. Convert PCM (int16 -> f32)    |
-#             | 2. resample_audio() (to 16kHz)   |
-#             | 3. session.buf.push()            |
-#             +----------------------------------+
-#                           |
-#               (If Buffer Ready & !Locked)
-#                           |
-#                           |----> asyncio.create_task()
-#                           v
-#             +----------------------------------+
-#             | _process_utt()                   |
-#             | * session.lock.acquire()         |
-#             +----------------------------------+
-#                           |
-#                           |----> stt_sync() (Speech to Text)
-#                           |----> _collapse_repetitions()
-#                           |----> _is_hallucination()
-#                           |----> _gemini_sync() (LLM Logic)
-#                           |----> session.history.append()
-#                           |
-#                 (Check session.mode)
-#                 /         |         \
-#       [ ASSIST ]     [ PARALLEL ]    [ TAKEOVER ]
-#           |               |               |
-#     event_hub()     _piper_sync()   _piper_sync()
-#     (Suggestion)    (TTS)           (TTS)
-#           |               |               |
-#           |         push_tts_wav()  push_tts_wav()
-#           \               |               /
-#            +--------------+--------------+
-#                           |
-#             +----------------------------------+
-#             | session.lock.release()           |
-#             +----------------------------------+
-#                           |
-#               [ WAIT FOR NEXT AUDIO ]
+#       |----> asyncio.create_task()
+#       v
+# +------------------------------------------+
+# | AIJoinManager -> _ai_assist_task()       |
+# | * Connect Room & publish AI track        |
+# +------------------------------------------+
+#       |
+#       |----> Event: on("track_subscribed")
+#       v
+# +------------------------------------------+
+# | AIJoinManager -> _inbound_loop()         |
+# | * Buffer and resample incoming audio     |
+# +------------------------------------------+
+#       |
+#       | (If Buffer Ready)
+#       |----> asyncio.create_task()
+#       v
+# +------------------------------------------+
+# | AIJoinManager -> _process_utt()          |
+# | * Run STT, LLM, and TTS logic            |
+# +------------------------------------------+
+#       |
+#       |----> [ Helper Classes ]
+#       |      * BufList.push() / flush()
+#       |      * TtsAudioSource.push_tts_wav()
+#       v
+# [ WAIT FOR NEXT AUDIO ]
               
               
 import asyncio
@@ -85,15 +44,22 @@ import numpy as np
 
 from typing import Dict, Any, Optional
 
-from livekit import rtc
+try:
+    from livekit import rtc
+except ImportError:
+    rtc = None
 from livekit.token_service import generate_token, LIVEKIT_URL
 from livekit.websocket import event_hub
 from livekit.audio_source import TtsAudioSource
 
-from backend.core.stt import stt_sync, _collapse_repetitions, _is_hallucination
-from backend.core.tts import _piper_sync, _humanize_text
-from backend.core.llm import _gemini_sync
-from backend.core.config import LANGUAGE_CONFIG
+try:
+    from backend.core.stt import stt_sync, _collapse_repetitions, _is_hallucination
+    from backend.core.tts import _http_tts_sync as _piper_sync, _humanize_text
+    from backend.core.llm import _gemini_sync
+    from backend.core.config import LANGUAGE_CONFIG
+except ImportError:
+    stt_sync = _collapse_repetitions = _is_hallucination = None
+    _piper_sync = _humanize_text = _gemini_sync = LANGUAGE_CONFIG = None
 
 from livekit.ai_assist.ai_modes import AIMode
 
@@ -101,13 +67,17 @@ logger = logging.getLogger("callcenter.ai_assist.join_manager")
 
 class BufList:
     def __init__(self):
+        logger.debug("Executing BufList.__init__")
         self.frames = []
     def push(self, frame):
+        logger.debug("Executing BufList.push")
         self.frames.append(frame)
     def ready(self):
         # A simple heuristic for 500ms chunk
+        logger.debug("Executing BufList.ready")
         return len(self.frames) > 50
     def flush(self):
+        logger.debug("Executing BufList.flush")
         if not self.frames: return None
         out = np.concatenate(self.frames)
         self.frames = []
@@ -115,6 +85,7 @@ class BufList:
 
 class AIAssistSession:
     def __init__(self, room_id: str, mode: AIMode, lang: str):
+        logger.debug("Executing AIAssistSession.__init__")
         self.room_id = room_id
         self.session_id = str(uuid.uuid4())
         self.mode = mode
@@ -129,6 +100,7 @@ class AIAssistSession:
 
 class AIJoinManager:
     def __init__(self):
+        logger.debug("Executing AIJoinManager.__init__")
         self.active_sessions: Dict[str, AIAssistSession] = {}
         self._lock = asyncio.Lock() 
        
@@ -137,6 +109,7 @@ class AIJoinManager:
 
     async def join_room(self, room_id: str, mode: str, lang: str = "en", source: str = "browser"):
       
+        logger.debug("Executing AIJoinManager.join_room")
         import time as _t
         mode_enum = AIMode(mode)
        
@@ -167,6 +140,7 @@ class AIJoinManager:
         asyncio.create_task(self._ai_assist_task(session, source))
 
     async def _ai_assist_task(self, session: AIAssistSession, source: str = "browser"):
+        logger.debug("Executing AIJoinManager._ai_assist_task")
         token = generate_token(
             room_name=session.room_id,
             identity=session.identity,
@@ -177,11 +151,13 @@ class AIJoinManager:
 
         @session.room.on("participant_connected")
         def _on_p_connected(participant):
+            logger.debug("Executing AIJoinManager._on_p_connected")
             logger.info(f"[AI Assist] Participant {getattr(participant, 'identity', '')} joined {session.room_id}")
 
         @session.room.on("participant_disconnected")
         def _on_p_disconnected(participant):
             
+            logger.debug("Executing AIJoinManager._on_p_disconnected")
             remaining = [
                 p for p in session.room.remote_participants.values()
                 if "ai-assist" not in (getattr(p, "identity", "") or "")
@@ -192,6 +168,7 @@ class AIJoinManager:
 
         @session.room.on("track_subscribed")
         def _on_t_subscribed(track, publication, participant):
+            logger.debug("Executing AIJoinManager._on_t_subscribed")
             is_audio = isinstance(track, rtc.RemoteAudioTrack)
             if not is_audio:
                 kind_val = getattr(track, "kind", None)
@@ -203,6 +180,7 @@ class AIJoinManager:
 
         @session.room.on("disconnected")
         def _on_disconnected(*args):
+            logger.debug("Executing AIJoinManager._on_disconnected")
             logger.info(f"[AI Assist] AI Disconnected from room {session.room_id}")
             session.closed = True
 
@@ -251,6 +229,7 @@ class AIJoinManager:
                 del self._join_debounce[session.room_id]
         
     async def _inbound_loop(self, session: AIAssistSession, track):
+        logger.debug("Executing AIJoinManager._inbound_loop")
         try:
             stream = rtc.AudioStream(track, sample_rate=16_000, num_channels=1)
         except TypeError:
@@ -279,6 +258,7 @@ class AIJoinManager:
                     asyncio.create_task(self._process_utt(pcm_utt, session))
 
     async def _process_utt(self, pcm: np.ndarray, session: AIAssistSession):
+        logger.debug("Executing AIJoinManager._process_utt")
         loop = asyncio.get_running_loop()
         async with session.lock:
             try:

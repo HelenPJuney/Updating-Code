@@ -1,0 +1,23 @@
+{
+  "name": "livekit-ai-agent-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@livekit/components-react": "^2.6.5",
+    "@livekit/components-styles": "^1.1.4",
+    "livekit-client": "^2.5.9",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.10"
+  }
+}

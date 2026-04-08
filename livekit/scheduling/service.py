@@ -40,14 +40,10 @@
 # +-----------------------------+
 #     |
 #     | [ _poll_loop() ]
-#     |----> WHILE _running:
-#     |        ----> await _check_due_jobs()
-#     |        ----> await asyncio.sleep(SCHEDULING_POLL_SEC)
+#     |----> Check for due jobs every SCHEDULING_POLL_SEC seconds)
 #     |
 #     | [ _check_due_jobs() ]
-#     |----> Query JobStore.list_due()
-#     |----> Map due jobs to _execute_job()
-#     |----> Throttling: Execute with Semaphore(5)
+#     |----> Executing ScheduledCallService._check_due_jobs
 #     |
 #     | [ _execute_job(job) ]
 #     |----> Update status to RUNNING
@@ -99,6 +95,7 @@ class ScheduledCallService:
     """
 
     def __init__(self, db_path: Optional[str] = None) -> None:
+        logger.debug("Executing ScheduledCallService.__init__")
         self._store   = JobStore(db_path)
         self._running = False
         self._task:   Optional[asyncio.Task] = None
@@ -106,6 +103,7 @@ class ScheduledCallService:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        logger.debug("Executing ScheduledCallService.start")
         await asyncio.get_running_loop().run_in_executor(None, self._store.open)
         self._running = True
         self._task = asyncio.create_task(self._poll_loop(), name="scheduling-poll")
@@ -114,6 +112,7 @@ class ScheduledCallService:
         )
 
     async def stop(self) -> None:
+        logger.debug("Executing ScheduledCallService.stop")
         self._running = False
         if self._task:
             self._task.cancel()
@@ -131,6 +130,7 @@ class ScheduledCallService:
         Persist a new scheduled call job.
         Returns the job_id.
         """
+        logger.debug("Executing ScheduledCallService.schedule")
         await asyncio.get_running_loop().run_in_executor(
             None, self._store.upsert, job
         )
@@ -144,6 +144,7 @@ class ScheduledCallService:
         """
         Cancel a pending job. Returns False if job not found or not pending.
         """
+        logger.debug("Executing ScheduledCallService.cancel")
         loop = asyncio.get_running_loop()
         job  = await loop.run_in_executor(None, self._store.get, job_id)
         if not job or job.status != JobStatus.PENDING:
@@ -155,6 +156,7 @@ class ScheduledCallService:
         return True
 
     async def get_job(self, job_id: str) -> Optional[ScheduledCallJob]:
+        logger.debug("Executing ScheduledCallService.get_job")
         return await asyncio.get_running_loop().run_in_executor(
             None, self._store.get, job_id
         )
@@ -165,11 +167,13 @@ class ScheduledCallService:
         limit: int = 50,
         offset: int = 0,
     ) -> List[ScheduledCallJob]:
+        logger.debug("Executing ScheduledCallService.list_jobs")
         return await asyncio.get_running_loop().run_in_executor(
             None, self._store.list_all, status, limit, offset
         )
 
     async def stats(self) -> dict:
+        logger.debug("Executing ScheduledCallService.stats")
         counts = await asyncio.get_running_loop().run_in_executor(
             None, self._store.count_by_status
         )
@@ -183,6 +187,7 @@ class ScheduledCallService:
 
     async def _poll_loop(self) -> None:
         """Check for due jobs every SCHEDULING_POLL_SEC seconds."""
+        logger.debug("Executing ScheduledCallService._poll_loop")
         while self._running:
             try:
                 await self._check_due_jobs()
@@ -191,6 +196,7 @@ class ScheduledCallService:
             await asyncio.sleep(SCHEDULING_POLL_SEC)
 
     async def _check_due_jobs(self) -> None:
+        logger.debug("Executing ScheduledCallService._check_due_jobs")
         loop = asyncio.get_running_loop()
         due  = await loop.run_in_executor(None, self._store.list_due)
         if not due:
@@ -199,6 +205,7 @@ class ScheduledCallService:
         # Execute concurrently but cap at 5 to avoid overloading Kafka
         sem = asyncio.Semaphore(5)
         async def _bounded(job):
+            logger.debug("Executing ScheduledCallService._bounded")
             async with sem:
                 await self._execute_job(job)
         await asyncio.gather(*[_bounded(j) for j in due], return_exceptions=True)
@@ -210,6 +217,7 @@ class ScheduledCallService:
           2. Publish SIP outbound call request to Kafka (or fallback)
           3. Mark COMPLETED or retry on failure
         """
+        logger.debug("Executing ScheduledCallService._execute_job")
         loop = asyncio.get_running_loop()
 
         # Mark running
@@ -263,6 +271,7 @@ class ScheduledCallService:
         Publish a CallRequest to Kafka for an outbound scheduled call.
         Falls back to the SIP outbound REST endpoint if Kafka unavailable.
         """
+        logger.debug("Executing ScheduledCallService._dispatch_call")
         from ..kafka.producer import get_producer
         from ..kafka.schemas import CallRequest
 
@@ -287,6 +296,7 @@ class ScheduledCallService:
 
     async def _sip_outbound_fallback(self, job: ScheduledCallJob, req) -> None:
         """Call the internal /sip/outbound-call endpoint as fallback."""
+        logger.debug("Executing ScheduledCallService._sip_outbound_fallback")
         try:
             from ..sip.sip_ingress import sip_session_mgr
             from ..sip.sip_event_handler import _publish_sip_call_request
@@ -308,6 +318,7 @@ class ScheduledCallService:
 
     async def _send_to_dlq(self, job: ScheduledCallJob, error: str) -> None:
         """Publish exhausted job to Kafka DLQ."""
+        logger.debug("Executing ScheduledCallService._send_to_dlq")
         try:
             from ..kafka.producer import get_producer
             from ..kafka.config import TOPIC_CALL_DLQ

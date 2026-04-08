@@ -1,54 +1,43 @@
-# [ START ]
-#     |
-#     v
-# +--------------------------+
-# | route(req)               |
-# | * Core logic entry point |
-# | * Evaluates all rules    |
-# +--------------------------+
-#     |
-#     | [ 1. Rule Matching ]
-#     |----> _matches(cond, req, now) 
-#     |        |-- Checks: Lang, Source, Priority
-#     |        |-- Checks: Caller Prefix
-#     |        |-- Checks: UTC Time Window (_in_time_window)
-#     |
-#     | [ 2. Rule Not Found ]
-#     |----> Return "default_fallback" Decision
-#     |
-#     | [ 3. Rule Matched ]
-#     |----> Extract target (queue, skills, ai_config)
-#     |
-#     | [ 4. Human Agent Lookup ]
-#     |----> AgentPool.find_best(required_skills)
-#     |        |-- Filter: Available + Free Slots + Skills
-#     |        |-- Pick: Agent with most free slots
-#     |
-#     | [ 5. Booking ]
-#     |----> AgentPool.book(agent_id)
-#     |        |-- Increment active_calls
-#     |
-#     v
-# +--------------------------+
-# | RoutingDecision          |
-# | * Immutable Result       |
-# +--------------------------+
-#     |
-#     |----> apply(req)
-#     |        |-- Mutates req with queue/priority
-#     |        |-- Injects AI config (LLM/Voice)
-#     |        |-- Sets escalation_target (node_id)
-#     v
-# +--------------------------+
-# | Agent & Rule Management  |
-# | * register_agent()       |
-# | * deregister_agent()     |
-# | * release_agent()        |
-# | * reload_rules()         |
-# +--------------------------+
-#     |
-#     v
-# [ YIELD ]
+# [ START: ROUTING REQUEST ]
+#       |
+#       v
+# +------------------------------------------+
+# | RoutingEngine -> route(req)              |
+# | * Iterate through loaded rules           |
+# +------------------------------------------+
+#       |
+#       |----> _matches(conditions, req)
+#       |      * Checks: lang, source, priority
+#       |      * Checks: number/ID prefixes
+#       |      * Calls _in_time_window()
+#       |
+#       | (If Rule Fired)
+#       v
+# +------------------------------------------+
+# | [ Target Extraction ]                    |
+# | * Get queue_name & priority_override     |
+# | * Check for required_skills               |
+# +------------------------------------------+
+#       |
+#       | (If Skills Required)
+#       |----> AgentPool -> find_best(skills)
+#       |      * Filter candidates via has_skills()
+#       |      * Check free_slots > 0
+#       |      * Returns agent with most slots
+#       |
+#       |----> AgentPool -> book(agent_id)
+#       |      * Increments active_calls (+1)
+#       v
+# +------------------------------------------+
+# | RoutingDecision Object Created           |
+# | * Stores matched agent & AI config       |
+# +------------------------------------------+
+#       |
+#       |----> decision.apply(req)
+#       |      * Mutates CallRequest metadata
+#       |      * Sets escalation_target (node_id)
+#       v
+# [ END: ROUTED CALL REQUEST ]
 
 
 import asyncio
@@ -81,9 +70,11 @@ class AgentInfo:
 
     @property
     def free_slots(self) -> int:
+        logger.debug("Executing AgentInfo.free_slots")
         return max(0, self.max_calls - self.active_calls)
 
     def has_skills(self, required: List[str]) -> bool:
+        logger.debug("Executing AgentInfo.has_skills")
         if not required:
             return True
         return all(s in self.skills for s in required)
@@ -93,10 +84,12 @@ class AgentPool:
     """Thread-safe in-memory human agent registry."""
 
     def __init__(self) -> None:
+        logger.debug("Executing AgentPool.__init__")
         self._agents: Dict[str, AgentInfo] = {}
         self._lock = asyncio.Lock()
 
     async def register(self, info: AgentInfo) -> None:
+        logger.debug("Executing AgentPool.register")
         async with self._lock:
             self._agents[info.agent_id] = info
             logger.info(
@@ -105,6 +98,7 @@ class AgentPool:
             )
 
     async def deregister(self, agent_id: str) -> None:
+        logger.debug("Executing AgentPool.deregister")
         async with self._lock:
             self._agents.pop(agent_id, None)
             logger.info("[AgentPool] deregistered agent=%s", agent_id)
@@ -115,6 +109,7 @@ class AgentPool:
         Picks agent with most free slots among qualified candidates.
         Returns None if no agent available.
         """
+        logger.debug("Executing AgentPool.find_best")
         async with self._lock:
             candidates = [
                 a for a in self._agents.values()
@@ -126,6 +121,7 @@ class AgentPool:
 
     async def book(self, agent_id: str) -> bool:
         """Reserve one call slot for the agent. Returns False if no slot."""
+        logger.debug("Executing AgentPool.book")
         async with self._lock:
             agent = self._agents.get(agent_id)
             if not agent or agent.free_slots <= 0:
@@ -135,17 +131,20 @@ class AgentPool:
 
     async def release(self, agent_id: str) -> None:
         """Free one call slot after the call ends."""
+        logger.debug("Executing AgentPool.release")
         async with self._lock:
             agent = self._agents.get(agent_id)
             if agent:
                 agent.active_calls = max(0, agent.active_calls - 1)
 
     async def heartbeat(self, agent_id: str) -> None:
+        logger.debug("Executing AgentPool.heartbeat")
         async with self._lock:
             if agent_id in self._agents:
                 self._agents[agent_id].last_seen = time.time()
 
     def snapshot(self) -> List[Dict]:
+        logger.debug("Executing AgentPool.snapshot")
         return [
             {
                 "agent_id":     a.agent_id,
@@ -187,6 +186,7 @@ class RoutingDecision:
         Enrich a CallRequest with routing metadata.
         Returns the same object (mutated in-place) for chaining.
         """
+        logger.debug("Executing RoutingDecision.apply")
         req.queue_name       = self.queue_name
         req.priority         = self.priority
         req.required_skills  = self.required_skills
@@ -223,29 +223,36 @@ class RoutingEngine:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing RoutingEngine.__init__")
         self._loader = RuleLoader()
         self._pool   = AgentPool()
         self._lock   = asyncio.Lock()
 
     def load_rules(self) -> None:
         """Load rules from disk (call at startup and on hot-reload)."""
+        logger.debug("Executing RoutingEngine.load_rules")
         self._loader.load()
 
     # ── Agent registration ────────────────────────────────────────────────────
 
     async def register_agent(self, info: AgentInfo) -> None:
+        logger.debug("Executing RoutingEngine.register_agent")
         await self._pool.register(info)
 
     async def deregister_agent(self, agent_id: str) -> None:
+        logger.debug("Executing RoutingEngine.deregister_agent")
         await self._pool.deregister(agent_id)
 
     async def release_agent(self, agent_id: str) -> None:
+        logger.debug("Executing RoutingEngine.release_agent")
         await self._pool.release(agent_id)
 
     async def agent_heartbeat(self, agent_id: str) -> None:
+        logger.debug("Executing RoutingEngine.agent_heartbeat")
         await self._pool.heartbeat(agent_id)
 
     def agents_snapshot(self) -> List[Dict]:
+        logger.debug("Executing RoutingEngine.agents_snapshot")
         return self._pool.snapshot()
 
     # ── Core routing logic ────────────────────────────────────────────────────
@@ -257,6 +264,7 @@ class RoutingEngine:
         Returns a RoutingDecision with all metadata needed to enrich the req.
         Does NOT mutate req — caller must call decision.apply(req).
         """
+        logger.debug("Executing RoutingEngine.route")
         now_utc = datetime.now(timezone.utc)
         matched_rule: Optional[RoutingRule] = None
 
@@ -324,6 +332,7 @@ class RoutingEngine:
         """Return True only if ALL defined conditions are satisfied."""
 
         # lang match
+        logger.debug("Executing RoutingEngine._matches")
         if cond.lang is not None:
             if getattr(req, "lang", "en") not in cond.lang:
                 return False
@@ -367,9 +376,11 @@ class RoutingEngine:
     # ── Rule management helpers ───────────────────────────────────────────────
 
     def rules_snapshot(self) -> List[Dict]:
+        logger.debug("Executing RoutingEngine.rules_snapshot")
         return self._loader.to_dict_list()
 
     def reload_rules(self) -> int:
+        logger.debug("Executing RoutingEngine.reload_rules")
         self._loader.load()
         return len(self._loader.rules)
 
@@ -382,6 +393,7 @@ def _in_time_window(now: datetime, start_hhmm: str, end_hhmm: str) -> bool:
     Both are "HH:MM" strings in 24-hour format.
     Handles overnight windows (e.g. "22:00" → "06:00").
     """
+    logger.debug("Executing _in_time_window")
     try:
         sh, sm = map(int, start_hhmm.split(":"))
         eh, em = map(int, end_hhmm.split(":"))

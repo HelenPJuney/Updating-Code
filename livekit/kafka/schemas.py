@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 # [ START ]
 #     |
 #     v
@@ -125,3 +128,22 @@ class QueueUpdate(BaseModel):
 class CallStart(BaseModel):
   
     type: str = "call_start"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Queue Center Events
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class QueueCallEvent(BaseModel):
+    """Event for synchronizing queue state across instances."""
+    event_type:     str   # enqueue | dequeue | pop
+    session_id:     str
+    room_id:        Optional[str] = None
+    caller_id:      Optional[str] = None
+    user_email:     Optional[str] = None
+    department:     Optional[str] = None
+    joined_at:      Optional[float] = None
+    call_log_id:    Optional[int] = None
+    user_id:        Optional[int] = None
+    skip_outbound:  Optional[bool] = False
+    reason:         Optional[str] = None  # for dequeue (abandoned/completed)

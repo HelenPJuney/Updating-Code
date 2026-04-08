@@ -1,19 +1,37 @@
-"""
-ai_assist/ai_controller.py
-────────────────────────────────────────────────────────────────────────────
-AI assist router — manual join + LiveKit webhook auto-join.
+# [ START: EXTERNAL TRIGGER ]
+#       |
+#       |--- (A) POST /ai/join (Manual AIJoinRequest)
+#       |--- (B) POST /ai/webhook (LiveKit Webhook)
+#       v
+# +------------------------------------------+
+# | ai_assist_router -> ai_join() / webhook()|
+# | * Validate room_id, mode, lang, source   |
+# +------------------------------------------+
+#       |
+#       | (If Webhook Request)
+#       |----> [ Webhook Signature Verification ]
+#       |      * Verify via API Key/Secret
+#       |----> [ Event Filter ]
+#       |      * Check for PARTICIPANT_JOINED
+#       |----> [ Metadata Parsing ]
+#       |      * Extract ai_mode, lang, source
+#       |----> [ Human Agent Check ]
+#       |      * Check identity for 'human-' or 'agent-'
+#       |
+#       | (If Valid/Manual)
+#       v
+# +------------------------------------------+
+# | ai_join_manager -> join_room()           |
+# | * Manual: Await direct execution         |
+# | * Webhook: background_tasks.add_task()   |
+# +------------------------------------------+
+#       |
+#       |----> [ External Manager Execution ]
+#       |      * Forwards source for tracing
+#       v
+# [ RETURN 200 OK / Response dict ]
+# (Status: success / ai_join_scheduled)
 
-FIX #10: source is detected from room metadata and passed to join_room()
-         so AI join manager can log and trace per source.
-
-FIX #10: AI joins ONLY when:
-         - a human agent/human- participant joins, OR
-         - room metadata explicitly sets ai_auto_join=true
-
-FIX #11: Structured logging with room_id, source, participant identity.
-
-FIX #4:  source is forwarded through to join_room() for traceability.
-"""
 
 import json
 import logging
@@ -73,15 +91,7 @@ async def ai_join(req: AIJoinRequest) -> dict:
 
 @ai_assist_router.post("/webhook")
 async def livekit_webhook(request: Request, background_tasks: BackgroundTasks) -> dict:
-    """
-    LiveKit Webhook — auto-join AI when a human agent joins a room.
-
-    FIX #10: source is extracted from room metadata (set by browser/router.py
-             or SIP handler) so join_room() knows the call origin.
-    FIX #10: joins ONLY when a human-* or agent-* participant joins
-             (not on every PARTICIPANT_JOINED event).
-    FIX #11: structured logging.
-    """
+    
     _start = time.perf_counter()
     logger.info("[livekit_webhook] START")
 

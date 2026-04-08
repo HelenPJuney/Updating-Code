@@ -105,12 +105,14 @@ class _SlidingWindowRateLimiter:
     """
 
     def __init__(self, max_requests: int, window_sec: float) -> None:
+        logger.debug("Executing _SlidingWindowRateLimiter.__init__")
         self._max = max_requests
         self._window = window_sec
         self._timestamps: deque[float] = deque()
 
     def allow(self) -> bool:
         """Return True if request is allowed, False if rate-limited."""
+        logger.debug("Executing _SlidingWindowRateLimiter.allow")
         now = time.time()
         # Evict expired timestamps
         while self._timestamps and self._timestamps[0] < now - self._window:
@@ -122,6 +124,7 @@ class _SlidingWindowRateLimiter:
 
     @property
     def current_count(self) -> int:
+        logger.debug("Executing _SlidingWindowRateLimiter.current_count")
         now = time.time()
         while self._timestamps and self._timestamps[0] < now - self._window:
             self._timestamps.popleft()
@@ -164,6 +167,7 @@ async def sip_webhook(request: Request):
         3. participant_left (SIP caller hangs up / BYE)
         4. room_finished (room destroyed after last participant leaves)
     """
+    logger.debug("Executing sip_webhook")
     if not ENABLE_SIP:
         raise HTTPException(status_code=503, detail="SIP integration disabled")
 
@@ -289,6 +293,7 @@ async def sip_webhook(request: Request):
 @sip_router.get("/health")
 async def sip_health():
     """SIP subsystem health check."""
+    logger.debug("Executing sip_health")
     kafka_active = False
     try:
         from ..kafka.producer import get_producer
@@ -320,6 +325,7 @@ async def sip_health():
 @sip_router.get("/sessions")
 async def sip_sessions():
     """List all tracked SIP sessions (active and recent)."""
+    logger.debug("Executing sip_sessions")
     return {
         "sessions": sip_session_mgr.to_dict_list(),
         "active_count": sip_session_mgr.active_count,
@@ -330,6 +336,7 @@ async def sip_sessions():
 @sip_router.get("/session/{session_id}")
 async def sip_session_detail(session_id: str):
     """Lookup a specific SIP session by session_id."""
+    logger.debug("Executing sip_session_detail")
     sess = sip_session_mgr.get_by_session(session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="SIP session not found")
@@ -349,6 +356,7 @@ async def sip_session_detail(session_id: str):
 @sip_router.get("/metrics")
 async def sip_metrics():
     """SIP-specific operational metrics."""
+    logger.debug("Executing sip_metrics")
     active_sessions = sip_session_mgr.get_all_active()
     states = {}
     for sess in sip_session_mgr.to_dict_list():
@@ -385,6 +393,7 @@ def _validate_webhook_signature(
 
     Returns True if signature is valid, False otherwise.
     """
+    logger.debug("Executing _validate_webhook_signature")
     if not auth_header:
         return False
 
@@ -423,6 +432,7 @@ async def sip_outbound_call(req: OutboundCallRequest):
     """
     Initiate an outbound call via LiveKit SIP to the PSTN.
     """
+    logger.debug("Executing sip_outbound_call")
     if not ENABLE_SIP:
         raise HTTPException(status_code=503, detail="SIP integration disabled")
         
@@ -504,6 +514,7 @@ async def sip_outbound_call(req: OutboundCallRequest):
 
 @sip_router.get("/outbound-status/{session_id}")
 async def sip_outbound_status(session_id: str):
+    logger.debug("Executing sip_outbound_status")
     sess = sip_session_mgr.get_by_session(session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="SIP session not found")

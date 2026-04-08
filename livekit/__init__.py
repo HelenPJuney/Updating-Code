@@ -1,3 +1,27 @@
+import logging
+logger = logging.getLogger(__name__)
+
+
+# ── Namespace package merge ────────────────────────────────────────────────────
+# The installed livekit SDK (livekit-api, livekit-rtc) is a namespace package
+# with no __init__.py. This local livekit/ package (which HAS an __init__.py)
+# would normally shadow it. We fix this by appending the installed SDK path to
+# __path__ so that `from livekit.api import ...` still resolves correctly.
+import sys as _sys
+from pathlib import Path as _Path
+
+def _extend_livekit_path():
+    logger.debug("Executing _extend_livekit_path")
+    _here = _Path(__file__).parent
+    for _p in _sys.path:
+        _candidate = _Path(_p) / "livekit"
+        if _candidate != _here and (_candidate / "api").exists():
+            if str(_candidate) not in __path__:
+                __path__.append(str(_candidate))
+            break
+
+_extend_livekit_path()
+# ──────────────────────────────────────────────────────────────────────────────
 
 from .ai_worker import livekit_router
 from .kafka.health import kafka_health_router
@@ -32,6 +56,7 @@ __all__ = [
 
 def _attach_event_hooks() -> None:
   
+    logger.debug("Executing _attach_event_hooks")
     try:
         from .websocket import event_hub
         from .kafka import worker_service as _ws_mod

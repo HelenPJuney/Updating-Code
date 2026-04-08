@@ -101,7 +101,15 @@ from backend.core.config import LANGUAGE_CONFIG
 from backend.core.state import _m
 from backend.core.persona import extract_agent_name, generate_greeting
 from backend.core.stt import stt_sync, _collapse_repetitions, _is_hallucination
-from backend.core.tts import _piper_sync, _humanize_text
+from backend.core.tts import _http_tts_sync as _piper_sync_new, _humanize_text
+
+def _piper_sync(text: str, model_path: str, lang: str = "en", voice_name: str = "") -> bytes:
+    logger.debug("Executing _piper_sync")
+    return _piper_sync_new(text, lang, voice_name)
+
+def _tts(text: str, lang: str, voice_name: str) -> bytes:
+    logger.debug("Executing _tts")
+    return _piper_sync_new(text, lang, voice_name)
 from backend.core.llm import _gemini_sync, _qwen_sync
 from backend.services.greeting_loader import load_greetings
 
@@ -122,6 +130,7 @@ livekit_router = APIRouter(prefix="/livekit", tags=["livekit"])
 class _RateLimiter:
 
     def __init__(self, max_calls: int, window_sec: float) -> None:
+        logger.debug("Executing _RateLimiter.__init__")
         self._max_calls  = max_calls
         self._window_sec = window_sec
         self._calls: List[float] = []   # timestamps of recent requests
@@ -129,6 +138,7 @@ class _RateLimiter:
 
     async def check(self) -> bool:
      
+        logger.debug("Executing _RateLimiter.check")
         now = asyncio.get_running_loop().time()
         async with self._lock:
             # Remove timestamps outside the current window
@@ -149,6 +159,7 @@ async def get_livekit_token(
     voice: str = "",
 ):
  
+    logger.debug("Executing get_livekit_token")
     room_id    = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
 
@@ -239,6 +250,7 @@ async def get_livekit_token(
 @livekit_router.get("/health")
 async def livekit_health():
     """Return current session count and Kafka status — useful for monitoring."""
+    logger.debug("Executing livekit_health")
     from .kafka.producer import get_producer
     producer = get_producer()
     return {
@@ -254,6 +266,7 @@ async def livekit_health():
 async def get_queue_status(session_id: str):
 
     # 1. Check if the session is actively running locally
+    logger.debug("Executing get_queue_status")
     if livekit_session_manager.get(session_id):
         return {
             "session_id":     session_id,
@@ -289,6 +302,7 @@ async def get_queue_status(session_id: str):
 
 def _ivr_post(path: str, body: dict) -> Optional[dict]:
     """Synchronous POST to ivr_backend — run via run_in_executor."""
+    logger.debug("Executing _ivr_post")
     try:
         import requests as _req
         r = _req.post(f"{_IVR_BASE}{path}", json=body, timeout=3.0)
@@ -300,6 +314,7 @@ def _ivr_post(path: str, body: dict) -> Optional[dict]:
 
 
 def _ivr_patch(path: str, body: dict) -> None:
+    logger.debug("Executing _ivr_patch")
     try:
         import requests as _req
         _req.patch(f"{_IVR_BASE}{path}", json=body, timeout=3.0)
@@ -308,6 +323,7 @@ def _ivr_patch(path: str, body: dict) -> None:
 
 
 async def _register_ivr_call(session: LiveKitSession) -> None:
+    logger.debug("Executing _register_ivr_call")
     loop = asyncio.get_running_loop()
     data = await loop.run_in_executor(None, _ivr_post, "/calls/start", {
         "caller_number": f"LiveKit-{session.session_id[:8]}",
@@ -319,6 +335,7 @@ async def _register_ivr_call(session: LiveKitSession) -> None:
 
 
 async def _save_transcript(call_id: int, speaker: str, text: str) -> None:
+    logger.debug("Executing _save_transcript")
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _ivr_post,
         f"/calls/{call_id}/transcript",
@@ -332,6 +349,7 @@ async def _save_transcript(call_id: int, speaker: str, text: str) -> None:
 
 def _build_recording(turns: List[dict]) -> Optional[bytes]:
 
+    logger.debug("Executing _build_recording")
     from backend.webrtc.utils import wav_bytes_to_pcm, resample_audio
 
     TARGET_SR   = 16_000
@@ -373,6 +391,7 @@ def _build_recording(turns: List[dict]) -> Optional[bytes]:
 
 async def _finalize_ivr_call(session: LiveKitSession) -> None:
     """Save recording + end call record in ivr_backend. Identical to old code."""
+    logger.debug("Executing _finalize_ivr_call")
     if not session.ivr_call_id:
         return
     loop = asyncio.get_running_loop()
@@ -407,6 +426,7 @@ async def _finalize_ivr_call(session: LiveKitSession) -> None:
 
 async def _publish_data(session: LiveKitSession, msg: dict) -> None:
 
+    logger.debug("Executing _publish_data")
     if session.room is None or session.closed:
         return
     try:
@@ -423,6 +443,7 @@ async def _publish_data(session: LiveKitSession, msg: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _send_greeting(session: LiveKitSession) -> None:
+    logger.debug("Executing _send_greeting")
     loop = asyncio.get_running_loop()
     try:
         greetings    = load_greetings()
@@ -434,7 +455,7 @@ async def _send_greeting(session: LiveKitSession) -> None:
         session.history.append({"role": "assistant", "text": greeting_text})
 
         wav_bytes = await loop.run_in_executor(
-            None, _piper_sync, greeting_text, session.model_path
+            None, _tts, greeting_text, session.lang, session.voice_name
         )
         await session.audio_source.push_tts_wav(wav_bytes)
         session.recording_turns.append({"type": "ai", "wav": wav_bytes})
@@ -464,6 +485,7 @@ async def _send_greeting(session: LiveKitSession) -> None:
 
 async def _inbound_audio_loop(session: LiveKitSession, track) -> None:
   
+    logger.debug("Executing _inbound_audio_loop")
     from livekit import rtc
 
     logger.info(
@@ -522,6 +544,7 @@ async def _inbound_audio_loop(session: LiveKitSession, track) -> None:
 
 async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
 
+    logger.debug("Executing _process_turn")
     loop = asyncio.get_running_loop()
 
     async with session.lock:
@@ -588,7 +611,7 @@ async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
             session.history.append({"role": "assistant", "text": barge_text})
             try:
                 barge_wav = await loop.run_in_executor(
-                    None, _piper_sync, barge_text, session.model_path
+                    None, _tts, barge_text, session.lang, session.voice_name
                 )
                 await session.audio_source.push_tts_wav(barge_wav)
                 session.recording_turns.append({"type": "ai", "wav": barge_wav})
@@ -606,7 +629,7 @@ async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
         logger.info("[Turn] TTS start  session=%s", session.session_id[:8])
         try:
             wav_bytes = await loop.run_in_executor(
-                None, _piper_sync, tts_text, session.model_path
+                None, _tts, tts_text, session.lang, session.voice_name
             )
             logger.info("[Turn] TTS done  session=%s", session.session_id[:8])
             await session.audio_source.push_tts_wav(wav_bytes)
@@ -626,6 +649,7 @@ async def _process_turn(pcm: np.ndarray, session: LiveKitSession) -> None:
             _u, _a, _l = user_text, ai_text, session.lang
 
             async def _persist() -> None:
+                logger.debug("Executing _persist")
                 try:
                     await loop.run_in_executor(
                         None, _m["memory"].save_interaction, _u, _a, _l
@@ -650,6 +674,7 @@ async def ai_worker_task(
     agent_name: str,
 ) -> None:
  
+    logger.debug("Executing ai_worker_task")
     from livekit import rtc
 
     session = LiveKitSession(
@@ -678,6 +703,7 @@ async def ai_worker_task(
     @room.on("participant_connected")
     def _on_participant_connected(participant) -> None:
 
+        logger.debug("Executing _on_participant_connected")
         ident: str = getattr(participant, "identity", "") or ""
         if _WORKER_IDENTITY_PREFIX in ident:
             return   # ignore our own join event
@@ -692,6 +718,7 @@ async def ai_worker_task(
     @room.on("participant_disconnected")
     def _on_participant_disconnected(participant) -> None:
         # End the call if the user leaves (browser closed / tab closed)
+        logger.debug("Executing _on_participant_disconnected")
         ident: str = getattr(participant, "identity", "") or ""
         if _WORKER_IDENTITY_PREFIX in ident:
             return   # ignore worker's own events
@@ -709,6 +736,7 @@ async def ai_worker_task(
     @room.on("track_subscribed")
     def _on_track_subscribed(track, publication, participant) -> None:
        
+        logger.debug("Executing _on_track_subscribed")
         ident: str = getattr(participant, "identity", "") or ""
         if _WORKER_IDENTITY_PREFIX in ident:
             return   # don't subscribe to our own track
@@ -735,6 +763,7 @@ async def ai_worker_task(
     @room.on("data_received")
     def _on_data_received(data_packet) -> None:
         """Handle control messages from the browser (interrupt, hangup)."""
+        logger.debug("Executing _on_data_received")
         try:
             raw  = getattr(data_packet, "data", data_packet)
             msg  = json.loads(bytes(raw).decode("utf-8"))
@@ -753,6 +782,7 @@ async def ai_worker_task(
 
     @room.on("disconnected")
     def _on_disconnected(*args) -> None:
+        logger.debug("Executing _on_disconnected")
         session.closed = True
 
     # ── Connect to LiveKit server ─────────────────────────────────────────────

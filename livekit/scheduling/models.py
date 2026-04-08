@@ -31,6 +31,9 @@
 #     v
 # [ YIELD ]
 
+
+import logging
+logger = logging.getLogger(__name__)
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -89,11 +92,13 @@ class ScheduledCallJob:
 
     def is_due(self, now: Optional[float] = None) -> bool:
         """Return True if the job is pending and its scheduled time has passed."""
+        logger.debug("Executing ScheduledCallJob.is_due")
         if self.status != JobStatus.PENDING:
             return False
         return (now or time.time()) >= self.scheduled_at
 
     def to_dict(self) -> dict:
+        logger.debug("Executing ScheduledCallJob.to_dict")
         return {
             "job_id":       self.job_id,
             "phone_number": self.phone_number,
@@ -118,6 +123,7 @@ class ScheduledCallJob:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ScheduledCallJob":
+        logger.debug("Executing ScheduledCallJob.from_dict")
         obj = cls(
             job_id       = d["job_id"],
             phone_number = d["phone_number"],

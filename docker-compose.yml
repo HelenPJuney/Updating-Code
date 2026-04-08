@@ -53,6 +53,7 @@ services:
       rpk --brokers kafka:9092 topic create worker_heartbeat --partitions 1 --replicas 1 2>/dev/null || true &&
       rpk --brokers kafka:9092 topic create call_dlq         --partitions 1 --replicas 1 2>/dev/null || true &&
       rpk --brokers kafka:9092 topic create sip_events       --partitions 1 --replicas 1 2>/dev/null || true &&
+      rpk --brokers kafka:9092 topic create callcenter_queue_events --partitions 4 --replicas 1 2>/dev/null || true &&
       echo All Kafka topics created.
     restart: "no"
 
@@ -102,7 +103,7 @@ services:
   # ── Asterisk PBX (PSTN gateway) ───────────────────────────────────────────
   # Publicly exposed component. Receives PSTN calls from Twilio.
   asterisk:
-    image: andrius/asterisk:latest
+    image: mlan/asterisk:base
     container_name: asterisk
     depends_on:
       - livekit-sip
@@ -111,14 +112,8 @@ services:
       - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
       - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
     ports:
-      # FIXED: Twilio sends SIP to port 5060. Asterisk must use host port 5060.
-      - "5060:5060/udp"        
+      - "5060:5060/udp"
       - "5060:5060/tcp"
-      # FIXED: RTP port range ensures no concurrent call limits or audio drops.
-      - "10000-20000:10000-20000/udp"
-    environment:
-      - ASTERISK_UID=0
-      - ASTERISK_GID=0
     restart: unless-stopped
 
 volumes:

@@ -57,14 +57,29 @@ except ImportError:
 
 # ── NoOp stubs so the rest of the code doesn't need to guard ─────────────────
 class _NoOpMetric:
-    def labels(self, **kw):   return self
-    def inc(self, v=1):       pass
-    def dec(self, v=1):       pass
-    def set(self, v):         pass
-    def observe(self, v):     pass
+    def labels(self, **kw):
+        logger.debug("Executing _NoOpMetric.labels")
+        return self
+
+    def inc(self, v=1):
+        logger.debug("Executing _NoOpMetric.inc")
+        pass
+
+    def dec(self, v=1):
+        logger.debug("Executing _NoOpMetric.dec")
+        pass
+
+    def set(self, v):
+        logger.debug("Executing _NoOpMetric.set")
+        pass
+
+    def observe(self, v):
+        logger.debug("Executing _NoOpMetric.observe")
+        pass
 
 
 def _metric(cls, name, doc, labelnames=()):
+    logger.debug("Executing _metric")
     if not _PROM_AVAILABLE:
         return _NoOpMetric()
     try:
@@ -167,6 +182,7 @@ async def kafka_health():
     Simple liveness check for the Kafka integration layer.
     Returns producer and Kafka connectivity status.
     """
+    logger.debug("Executing kafka_health")
     from .producer import get_producer
     producer = get_producer()
 
@@ -184,6 +200,7 @@ async def kafka_metrics():
     Expose Prometheus metrics in text format.
     Scrape this endpoint with Prometheus (or use a prometheus-exporter sidecar).
     """
+    logger.debug("Executing kafka_metrics")
     if not _PROM_AVAILABLE:
         return {"error": "prometheus-client not installed"}
     content = generate_latest()

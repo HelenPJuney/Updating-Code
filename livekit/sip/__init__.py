@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 from .sip_config import ENABLE_SIP

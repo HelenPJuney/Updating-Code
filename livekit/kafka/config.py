@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 import os
 import socket
@@ -33,6 +36,7 @@ TOPIC_CALL_COMPLETED:   str = "call_completed"
 TOPIC_CALL_FAILED:      str = "call_failed"
 TOPIC_WORKER_HEARTBEAT: str = "worker_heartbeat"
 TOPIC_CALL_DLQ:         str = "call_dlq"          # Dead-letter queue for exhausted retries
+TOPIC_QUEUE_EVENTS:     str = "callcenter_queue_events" 
 
 # Consumer group names
 CG_SCHEDULER:  str = "scheduler-group"

@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 from .handler import OfflineHandler, OfflineStatus, offline_handler

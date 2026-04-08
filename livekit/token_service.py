@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 # [ START ]
 #     |
@@ -44,6 +47,7 @@ def generate_token(
     can_subscribe: bool = True,
 ) -> str:
 
+    logger.debug("Executing generate_token")
     from livekit.api import AccessToken, VideoGrants
 
     grants = VideoGrants(

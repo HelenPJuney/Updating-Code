@@ -1,15 +1,53 @@
-"""
-integration/integration_router.py
-────────────────────────────────────────────────────────────────────────────
-External-app integration API.
-
-FIX #12: Both /call/start (SIP) and /call/browser/start (WebRTC) now return
-         the SAME response shape: {session_id, room_id, token, livekit_url, status}
-
-FIX #9:  register_webhook passes secret → HMAC signing used in service.py
-
-FIX #11: Proper HTTP error codes; no silent failures.
-"""
+# [ START: API REQUEST ]
+#       |
+#       v
+# +------------------------------------------+
+# | <FastAPI> -> Depends(validate_api_key)   |
+# | * Check X-API-Key & Rate Limits          |
+# +------------------------------------------+
+#       |
+#       |--- [ Auth Fail ] ---> [ RETURN: 401/429 ]
+#       |
+#       |--- [ Auth Success ]
+#       v
+#       +-------------------------------------------------------+
+#       |            SELECT ENDPOINT BY PATH                    |
+#       +------------+-------------+--------------+-------------+
+#                    |                            |
+#       [ POST /call/start ]            [ POST /call/browser/start ]
+#       (SIP / PSTN Path)               (WebRTC / Browser Path)
+#                    |                            |
+#       +----------------------------+  +----------------------------+
+#       | * integration_service.     |  | * integration_service.     |
+#       |   start_call()             |  |   start_browser_call()     |
+#       |   * Trigger outbound SIP   |  |   * Generate WebRTC Token  |
+#       +----------------------------+  +----------------------------+
+#                    |                            |
+#                    +-------------+--------------+
+#                                  |
+#                                  v
+#                   +------------------------------+
+#                   | Unified Response Shape:      |
+#                   | {session_id, room_id, token, |
+#                   |  livekit_url, status}        |
+#                   +------------------------------+
+#                                  |
+#       +--------------------------+--------------------------+
+#       |                                                     |
+# [ GET /call/{id}/status ]                 [ POST /webhook/register ]
+#       |                                                     |
+# +----------------------------+                +----------------------------+
+# | * integration_service.     |                | * integration_service.     |
+# |   get_call_status()        |                |   register_webhook()       |
+# |   * Fetch session data     |                |   * Forward Secret (FIX #9)|
+# +----------------------------+                +----------------------------+
+#       |                                                     |
+# [ Check if Found? ]                                [ RETURN: Success JSON ]
+#       |                                                     |
+#       |--- [ NO  ] ---> raise 404 Error                     |
+#       |--- [ YES ] ---> RETURN: Status JSON                 |
+#       v                                                     v
+#    [ END ]                                               [ END ]
 
 import logging
 import time
@@ -78,11 +116,7 @@ async def start_browser_call(
     request: BrowserCallStartRequest,
     client_id: str = Depends(validate_api_key),
 ) -> CallStartResponse:
-    """
-    Start a browser WebRTC call from an external app.
-    FIX #12: Returns {session_id, room_id, token, livekit_url, status}.
-    FIX #1:  caller_id is used (not caller_number).
-    """
+
     _start = time.perf_counter()
     caller = request.caller_id or client_id
     logger.info("[start_browser_call] START  client=%s  caller_id=%.16s", client_id, caller)
@@ -145,10 +179,7 @@ async def register_webhook(
     request: WebhookRegisterRequest,
     client_id: str = Depends(validate_api_key),
 ) -> WebhookRegisterResponse:
-    """
-    Register a webhook URL for call lifecycle events.
-    FIX #9: secret is now forwarded so HMAC signing is applied on delivery.
-    """
+  
     _start = time.perf_counter()
     logger.info("[register_webhook] client=%s  url=%.40s", client_id, request.url)
     try:

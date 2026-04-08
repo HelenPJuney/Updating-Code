@@ -1,15 +1,66 @@
-"""
-integration/service.py
-────────────────────────────────────────────────────────────────────────────
-IntegrationService — central orchestrator for external-app integrations.
+# [ START: service.start() ]
+#       |
+#       |----> * event_hub.subscribe() -> (Listen for LiveKit events)
+#       |----> * asyncio.create_task(_listen_loop())
+#       |----> * asyncio.create_task(_cleanup_loop())
+#       v
+# +------------------------------------------------------------+
+# |                LIFECYCLE & DATA HYGIENE                    |
+# +------------------------------------------------------------+
+#       |                                    |
+# [ _cleanup_loop() ]                 [ _listen_loop() ]
+#       |                                    |
+# *  TTL Cleanup                       * Receive: call_started/failed/etc
+# * Purge call_status_store (1hr)     * Update status: active/completed
+# * Purge auth.request_counts (60s)   * asyncio.create_task:
+#       |                               trigger_webhook()
+#       v                                    |
+# +------------------------------------------+-----------------+
+# |                PUBLIC INTERFACE (API)                      |
+# +------------------------------------------+-----------------+
+#       |                                    |
+# [ start_call() ]                    [ start_browser_call() ]
+# (SIP/PSTN Path)                     (WebRTC Path)
+#       |                                    |
+# *  Set caller_number               *  Set caller_id
+# *  submit_call_request()           * Delegate to browser_router
+# * Status = "queued"                 * result.token included
+#       |                                    |
+#       +-----------------+------------------+
+#                         |
+#                         v
+#           +-----------------------------+
+#           | FIX #12: Unified Return     |
+#           | {session_id, room_id, token,|
+#           |  livekit_url, status}       |
+#           +-----------------------------+
+#                         |
+#                         v
+# +------------------------------------------------------------+
+# |                WEBHOOK DELIVERY ENGINE                     |
+# +------------------------------------------------------------+
+#       |
+# [ trigger_webhook() ]
+#       |
+#       |--- (Fan-out to all subscribed client_ids)
+#       v
+# [ _deliver_webhook_with_retry() ]
+#       |
+#       |----> *  hmac.new(secret, body, hashlib.sha256)
+#       |----> * Generate "X-Webhook-Signature"
+#       |----> * httpx.post() attempt 1
+#       |
+#       +--- [ If Failed ] ---+
+#       |                     |
+#       |--- [ Retry Logic ] <+
+#       |    * Exponential Backoff (1s -> 2s)
+#       |    * Max Retries: 3
+#       v
+# [ LOG: session_id + result ]
+#       |
+# [ END ]
 
-Production fixes applied:
-  #5  — standardized to submit_call_request (was send_call_request in some paths)
-  #8  — TTL cleanup for call_status_store AND request_counts (auth.py's rate limiter)
-  #9  — HMAC-SHA256 webhook signing is now CORRECTLY computed (was hmac.new() bug)
-  #12 — start_call() returns room_id + token for SIP; start_browser_call() returns token
-  #11 — no silent failures; structured log lines with session_id
-"""
+
 
 import asyncio
 import hashlib

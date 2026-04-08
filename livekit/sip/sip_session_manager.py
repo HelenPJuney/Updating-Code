@@ -84,6 +84,7 @@ class SipSession:
 
     def transition(self, new_state: SipCallState) -> None:
         """Move to a new state and update timestamp."""
+        logger.debug("Executing SipSession.transition")
         old = self.state
         self.state = new_state
         self.updated_at = time.time()
@@ -105,6 +106,7 @@ class SipSessionManager:
     """
 
     def __init__(self) -> None:
+        logger.debug("Executing SipSessionManager.__init__")
         self._by_sip_call:  Dict[str, SipSession] = {}
         self._by_session:   Dict[str, SipSession] = {}
         self._by_room:      Dict[str, SipSession] = {}
@@ -125,6 +127,7 @@ class SipSessionManager:
         Create and register a new SIP session mapping.
         Idempotent — returns existing session if sip_call_id already registered.
         """
+        logger.debug("Executing SipSessionManager.register")
         async with self._lock:
             if sip_call_id in self._by_sip_call:
                 existing = self._by_sip_call[sip_call_id]
@@ -154,12 +157,15 @@ class SipSessionManager:
     # ── Lookups ───────────────────────────────────────────────────────────────
 
     def get_by_sip_call(self, sip_call_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.get_by_sip_call")
         return self._by_sip_call.get(sip_call_id)
 
     def get_by_session(self, session_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.get_by_session")
         return self._by_session.get(session_id)
 
     def get_by_room(self, room_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.get_by_room")
         return self._by_room.get(room_id)
 
     # ── State transitions ─────────────────────────────────────────────────────
@@ -170,6 +176,7 @@ class SipSessionManager:
         new_state: SipCallState,
     ) -> Optional[SipSession]:
         """Transition a session to a new state. Returns None if not found."""
+        logger.debug("Executing SipSessionManager.update_state")
         async with self._lock:
             sess = self._by_session.get(session_id)
             if sess:
@@ -177,12 +184,15 @@ class SipSessionManager:
             return sess
 
     async def mark_connected(self, session_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.mark_connected")
         return await self.update_state(session_id, SipCallState.CONNECTED)
 
     async def mark_completed(self, session_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.mark_completed")
         return await self.update_state(session_id, SipCallState.COMPLETED)
 
     async def mark_failed(self, session_id: str) -> Optional[SipSession]:
+        logger.debug("Executing SipSessionManager.mark_failed")
         return await self.update_state(session_id, SipCallState.FAILED)
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
@@ -192,6 +202,7 @@ class SipSessionManager:
         Remove a session from all indices.
         Called after call ends and cleanup is complete.
         """
+        logger.debug("Executing SipSessionManager.remove")
         async with self._lock:
             sess = self._by_session.pop(session_id, None)
             if sess:
@@ -205,6 +216,7 @@ class SipSessionManager:
 
     async def remove_by_room(self, room_id: str) -> Optional[SipSession]:
         """Remove by room_id (used when LiveKit reports room closed)."""
+        logger.debug("Executing SipSessionManager.remove_by_room")
         sess = self._by_room.get(room_id)
         if sess:
             return await self.remove(sess.session_id)
@@ -215,6 +227,7 @@ class SipSessionManager:
     @property
     def active_count(self) -> int:
         """Number of sessions that are NOT completed/failed."""
+        logger.debug("Executing SipSessionManager.active_count")
         return sum(
             1 for s in self._by_session.values()
             if s.state in (SipCallState.RINGING, SipCallState.CONNECTED)
@@ -222,10 +235,12 @@ class SipSessionManager:
 
     @property
     def total_count(self) -> int:
+        logger.debug("Executing SipSessionManager.total_count")
         return len(self._by_session)
 
     def get_all_active(self) -> list[SipSession]:
         """Return all sessions in ringing or connected state."""
+        logger.debug("Executing SipSessionManager.get_all_active")
         return [
             s for s in self._by_session.values()
             if s.state in (SipCallState.RINGING, SipCallState.CONNECTED)
@@ -233,6 +248,7 @@ class SipSessionManager:
 
     def to_dict_list(self) -> list[dict]:
         """Serialise all sessions for API/debugging."""
+        logger.debug("Executing SipSessionManager.to_dict_list")
         return [
             {
                 "sip_call_id":  s.sip_call_id,

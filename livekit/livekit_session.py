@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 
 # [ START ]
 #     |
@@ -90,6 +93,7 @@ class LiveKitSession:
 
     def mark_interrupted(self) -> None:
         
+        logger.debug("Executing LiveKitSession.mark_interrupted")
         self.interrupted = True
         if self.audio_source is not None:
             drained = self.audio_source.clear()
@@ -97,6 +101,7 @@ class LiveKitSession:
 
     def _trim_last_ai_turn(self, drained_frames: int) -> None:
        
+        logger.debug("Executing LiveKitSession._trim_last_ai_turn")
         for i in range(len(self.recording_turns) - 1, -1, -1):
             if self.recording_turns[i]["type"] == "ai":
                 if "trim_frames" not in self.recording_turns[i]:
@@ -104,6 +109,7 @@ class LiveKitSession:
                 break
 
     def __repr__(self) -> str:
+        logger.debug("Executing LiveKitSession.__repr__")
         return (
             f"<LiveKitSession id={self.session_id[:8]} "
             f"lang={self.lang} llm={self.llm_key} "

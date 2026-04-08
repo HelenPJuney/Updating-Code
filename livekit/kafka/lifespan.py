@@ -45,6 +45,7 @@ async def start_kafka_producer() -> None:
     Start the Kafka producer singleton.
     Attach to FastAPI startup event or call from your lifespan context.
     """
+    logger.debug("Executing start_kafka_producer")
     from .producer import get_producer
     producer = get_producer()
     await producer.start()
@@ -56,6 +57,7 @@ async def stop_kafka_producer() -> None:
     Flush and close the Kafka producer singleton.
     Attach to FastAPI shutdown event or call from your lifespan context.
     """
+    logger.debug("Executing stop_kafka_producer")
     from .producer import get_producer
     producer = get_producer()
     await producer.stop()
@@ -72,6 +74,7 @@ async def kafka_lifespan(app: FastAPI):
     Use as:
         app = FastAPI(lifespan=kafka_lifespan)
     """
+    logger.debug("Executing kafka_lifespan")
     await start_kafka_producer()
     try:
         yield

@@ -62,6 +62,7 @@ class LiveKitSessionManager:
 
 
     def __init__(self) -> None:
+        logger.debug("Executing LiveKitSessionManager.__init__")
         self._sessions: Dict[str, LiveKitSession] = {}
         self._lock = asyncio.Lock()
 
@@ -69,6 +70,7 @@ class LiveKitSessionManager:
 
     async def add(self, session: LiveKitSession) -> None:
         """Register a newly created session."""
+        logger.debug("Executing LiveKitSessionManager.add")
         async with self._lock:
             self._sessions[session.session_id] = session
         logger.info(
@@ -78,6 +80,7 @@ class LiveKitSessionManager:
 
     async def remove(self, session_id: str) -> Optional[LiveKitSession]:
         """Remove and return session from registry (does NOT close resources)."""
+        logger.debug("Executing LiveKitSessionManager.remove")
         async with self._lock:
             session = self._sessions.pop(session_id, None)
         if session:
@@ -89,12 +92,26 @@ class LiveKitSessionManager:
 
     def get(self, session_id: str) -> Optional[LiveKitSession]:
         """Synchronous lookup — returns session or None."""
+        logger.debug("Executing LiveKitSessionManager.get")
         return self._sessions.get(session_id)
+
+    def get_by_room(self, room_id: str) -> Optional[LiveKitSession]:
+        """Find first active session whose LiveKit room name matches room_id."""
+        logger.debug("Executing LiveKitSessionManager.get_by_room")
+        for session in self._sessions.values():
+            if session.room is not None:
+                try:
+                    if session.room.name == room_id:
+                        return session
+                except Exception:
+                    pass
+        return None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def cleanup_session(self, session_id: str) -> None:
         
+        logger.debug("Executing LiveKitSessionManager.cleanup_session")
         session = await self.remove(session_id)
         if session is None:
             return   # already removed
@@ -115,6 +132,7 @@ class LiveKitSessionManager:
 
     async def cleanup_all(self) -> None:
         """Signal all sessions to close. Called from server shutdown."""
+        logger.debug("Executing LiveKitSessionManager.cleanup_all")
         async with self._lock:
             ids = list(self._sessions.keys())
         for sid in ids:
@@ -125,10 +143,12 @@ class LiveKitSessionManager:
 
     @property
     def count(self) -> int:
+        logger.debug("Executing LiveKitSessionManager.count")
         return len(self._sessions)
 
     @property
     def session_ids(self) -> list:
+        logger.debug("Executing LiveKitSessionManager.session_ids")
         return list(self._sessions.keys())
 
 

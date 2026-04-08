@@ -1,47 +1,41 @@
-# [ START: Security Dependency ]
+# [ START: INCOMING REQUEST ]
+#       |
+#       |--- Extract "X-API-Key" from Header
+#       v
+# +------------------------------------------+
+# | validate_api_key()                       |
+# | * Verify key against VALID_API_KEYS      |
+# +------------------------------------------+
+#       |
+#       | (If Key Unknown)
+#       |----> [ RAISE 401 UNAUTHORIZED ]
+#       |
+#       | (If Key Valid)
+#       v
+# +------------------------------------------+
+# | [ Acquire rate_limit_lock ]              |
+# | * Identify Client ID                     |
+# +------------------------------------------+
+#       |
+#       |----> [ Prune Old Timestamps ]
+#       |      * Remove records > 60s old
+#       |
+#       |----> [ Check Request Count ]
+#       |      * Count vs RATE_LIMIT_MAX_REQUESTS
+#       |
+#       | (If Limit Exceeded)
+#       |----> [ RAISE 429 TOO MANY REQUESTS ]
+#       |
+#       | (If Under Limit)
+#       v
+# +------------------------------------------+
+# | [ Update & Success ]                     |
+# | * Append current timestamp               |
+# | * Release lock                           |
+# +------------------------------------------+
 #       |
 #       v
-# +-----------------------------+
-# | validate_api_key()          |
-# | * Extract: X-API-Key Header |
-# +-----------------------------+
-#       |
-#       |--- [ Key NOT in VALID_API_KEYS ] ---+
-#       |                                     |
-#       |--- [ Key IS Valid ]                 v
-#       v                      [ RAISE: HTTPException(401) ]
-# +-----------------------------+
-# | Identify client_id          |
-# | Get current time.time()     |
-# +-----------------------------+
-#       |
-#       |----> rate_limit_lock.acquire()
-#       v
-# +---------------------------------------+
-# | Check request_counts[client_id]       |
-# +---------------------------------------+
-#       |
-#       |--- [ New Client ] ---> Initialize Empty List []
-#       |
-#       |--- [ Existing ] -----> Clean old timestamps
-#       v                        (now - t < 60s)
-# +---------------------------------------+
-# | len(request_counts) >= MAX_REQUESTS?  |
-# +---------------------------------------+
-#       |                                 |
-#       |--- [ YES ] ---------------------+--> [ RAISE: HTTPException(429) ]
-#       |                                 |    (Release Lock)
-#       |--- [ NO ]                       |
-#       v                                 |
-# +---------------------------------------+
-# | 1. append(now)                        |
-# | 2. rate_limit_lock.release()          |
-# +---------------------------------------+
-#       |
-#       v
-# [ RETURN: client_id ]
-#       |
-# [ END ]
+# [ RETURN client_id ]
 
 import time
 import asyncio
@@ -78,6 +72,7 @@ async def validate_api_key(api_key: str = Security(api_key_header)) -> str:
     Note: request_counts is purged periodically by IntegrationService._cleanup_loop()
     to prevent memory leaks from inactive clients.
     """
+    logger.debug("Executing validate_api_key")
     _start = time.perf_counter()
     logger.debug("[validate_api_key] START")
 

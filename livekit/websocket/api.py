@@ -1,22 +1,38 @@
-"""
-websocket/api.py
-────────────────────────────────────────────────────────────────────────────────
-WebSocket + Server-Sent Events (SSE) API for real-time dashboard updates.
-
-Endpoints:
-    WS   /ws/events          — WebSocket stream (preferred)
-    GET  /ws/stream          — SSE fallback for browsers that can't WS
-    GET  /ws/history         — last N events (JSON REST)
-    GET  /ws/stats           — hub statistics
-    POST /ws/publish         — manually publish a test event (dev use)
-
-WebSocket protocol:
-    Client connects → receives history replay (last 100 events)
-    Server sends: JSON event object on every publish()
-    Client can send: {"type": "ping"} → server replies {"type": "pong"}
-    Client can send: {"type": "subscribe", "filter": ["call_started", ...]}
-                     → future events are filtered (optional)
-"""
+# [ START: CLIENT CONNECTION ]
+#       |
+#       |--- (A) WS  /ws/events (Full-Duplex)
+#       |--- (B) GET /ws/stream (SSE Fallback)
+#       |--- (C) GET /ws/history (REST)
+#       v
+# +------------------------------------------+
+# | WEBSOCKET HANDLER: ws_events()           |
+# | * Accept Connection                      |
+# | * event_hub.subscribe(replay_history)    |
+# +------------------------------------------+
+#       |
+#       | [ Concurrent Task Split ]
+#       |
+#       |----> _sender() (Server to Client)
+#       |      * Pull events from Hub queue
+#       |      * Apply active_filter
+#       |      * Send JSON / Periodic Ping
+#       |
+#       |----> _receiver() (Client to Server)
+#       |      * Listen for "ping" -> "pong"
+#       |      * Update active_filter (subscribe)
+#       v
+# +------------------------------------------+
+# | SSE FALLBACK: sse_stream()               |
+# | * _generator() yields data: {json}       |
+# | * Headers: no-cache, no-buffering       |
+# +------------------------------------------+
+#       |
+#       |----> [ REST & Management ]
+#       |      * get_history(): Fetch last N
+#       |      * manual_publish(): Dev trigger
+#       v
+# [ END: CLIENT DISCONNECTED ]
+# (event_hub.unsubscribe handled in finally)
 
 import asyncio
 import json
@@ -40,6 +56,7 @@ async def ws_events(websocket: WebSocket):
     Full-duplex WebSocket stream of call-center events.
     Replays last 100 events to new connections.
     """
+    logger.debug("Executing ws_events")
     from . import event_hub
 
     await websocket.accept()
@@ -49,6 +66,7 @@ async def ws_events(websocket: WebSocket):
 
     async def _sender():
         """Push events from queue to WebSocket."""
+        logger.debug("Executing _sender")
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
@@ -66,6 +84,7 @@ async def ws_events(websocket: WebSocket):
 
     async def _receiver():
         """Process messages from the client."""
+        logger.debug("Executing _receiver")
         nonlocal active_filter
         while True:
             try:
@@ -111,9 +130,11 @@ async def sse_stream():
     Usage:  const es = new EventSource('/ws/stream');
             es.onmessage = e => console.log(JSON.parse(e.data));
     """
+    logger.debug("Executing sse_stream")
     from . import event_hub
 
     async def _generator():
+        logger.debug("Executing _generator")
         queue = await event_hub.subscribe(replay_history=False)
         try:
             while True:
@@ -142,6 +163,7 @@ async def sse_stream():
 @ws_router.get("/history")
 async def get_history(n: int = 50):
     """Get the last N events from the hub history."""
+    logger.debug("Executing get_history")
     from . import event_hub
     events = list(event_hub._history)
     return {
@@ -155,6 +177,7 @@ async def get_history(n: int = 50):
 @ws_router.get("/stats")
 async def hub_stats():
     """WebSocket hub statistics."""
+    logger.debug("Executing hub_stats")
     from . import event_hub
     return {**event_hub.stats(), "timestamp": time.time()}
 
@@ -165,6 +188,7 @@ async def manual_publish(event: Dict[str, Any]):
     Manually publish an event (dev/testing only).
     In production, events are published by the backend services.
     """
+    logger.debug("Executing manual_publish")
     from . import event_hub
     if "type" not in event:
         from fastapi import HTTPException
